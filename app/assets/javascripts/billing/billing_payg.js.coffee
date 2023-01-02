@@ -5,7 +5,9 @@ $ ->
       url: "/billing/payg",
       dataType: "html",
       success: (response) ->
-        $("#jg-payg-widget").html(response)
-        createPaygPie(payg_stats, true)
+        $(".jg-wallet-details").html(response)
+  
+  $('#auto_topup').on 'change', (e) ->
+    $(this).closest("form").submit()
 
   return

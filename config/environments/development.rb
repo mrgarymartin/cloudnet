@@ -9,6 +9,9 @@ CloudNet::Application.configure do
   # Do not eager load code on boot.
   config.eager_load = false
 
+  #eager load negative balance protection
+  Dir[Rails.root.join('app/services/negative_balance_protection/**/*.rb')].each { |file| load file }
+  Dir[Rails.root.join('lib/build_checker/**/*.rb')].each { |file| load file }
   # Show full error reports and disable caching.
   config.consider_all_requests_local       = true
   config.action_controller.perform_caching = false
@@ -48,6 +51,8 @@ CloudNet::Application.configure do
     domain: 'cloud.net'
   }
 
+  config.action_mailer.smtp_settings.merge!({ openssl_verify_mode: ENV['SMTP_SSL_VERIFY'] }) unless ENV['SMTP_SSL_VERIFY'].blank?
+
   # Print deprecation notices to the Rails logger.
   config.active_support.deprecation = :log
 
@@ -58,11 +63,11 @@ CloudNet::Application.configure do
   # This option may cause significant delays in view rendering with a large
   # number of complex assets.
   config.assets.debug = true
-     
+
   # Asset digests allow you to set far-future HTTP expiration dates on all assets,
   # yet still be able to expire them through the digest params.
   config.assets.digest = true
- 
+
   # Adds additional error checking when serving assets at runtime.
   # Checks for improperly declared sprockets dependencies.
   # Raises helpful error messages.
@@ -70,4 +75,8 @@ CloudNet::Application.configure do
 
   # Raises error for missing translations
   # config.action_view.raise_on_missing_translations = true
+
+  config.after_initialize do
+    ActiveRecord::Base.logger = nil
+  end
 end

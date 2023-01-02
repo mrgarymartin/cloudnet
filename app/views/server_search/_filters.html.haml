@@ -25,6 +25,9 @@
       %span.unit GB
       %slider-widget.wizard-slider.noUi-extended{:"ng-model" => "ctrl.state.counts.disk", defaults: "disk"}
 
+.regions.default-borders
+  %region-filter{state: "ctrl.state"}
+  
 .cloud-index.default-borders
   %cloud-index-filter.jg-sliders
 

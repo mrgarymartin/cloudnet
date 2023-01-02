@@ -1,16 +1,17 @@
 <p>Hello</p>
 
-<p>This is the Cloud.net Admin Financial Report for <%= @data[:date] %></p>
+<p>This is the <%= ENV['BRAND_NAME'] %> Admin Financial Report for <%= @data[:date] %></p>
 
 <ul>
-  <li>Cloud.net Signups: <%= @data[:signups] %></li>
+  <li>Signups: <%= @data[:signups] %></li>
   <li>Invoice Totals: <%= Invoice.pretty_total(@data[:invoices]) %></li>
-  <li>Credit Note Totals: <%= Invoice.pretty_total(@data[:credits]) %></li>
-  <li>Card Charges: <%= Invoice.pretty_total(@data[:charges]) %></li>
-  <li>Payment Reciept via Billing Card: <%= Invoice.pretty_total(@data[:payg_cc_charges]) %></li>
-  <li>Payment Reciept via Paypal: <%= Invoice.pretty_total(@data[:payg_paypal_charges]) %></li>
+  <li>Payment Receipts via Billing Card: <%= Invoice.pretty_total(@data[:cc_charges]) %></li>
+  <li>Payment Receipts via Paypal: <%= Invoice.pretty_total(@data[:paypal_charges]) %></li>
+  <li>Wallet Charges: <%= Invoice.pretty_total(@data[:wallet_charges]) %></li>
+  <li>Manual Credit Notes: <%= Invoice.pretty_total(@data[:manual_credits]) %></li>
+  <li>Trial Credit Notes: <%= Invoice.pretty_total(@data[:trial_credits]) %></li>
 </ul>
 
 <p>Thanks,</p>
 
-<p>Cloud.net Team</p>
+<p><%= ENV['BRAND_NAME'] %> Team</p>

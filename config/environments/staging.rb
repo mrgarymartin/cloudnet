@@ -20,7 +20,7 @@ CloudNet::Application.configure do
   # config.action_dispatch.rack_cache = true
 
   # Disable Rails's static asset server (Apache or nginx will already do this).
-  config.serve_static_assets = false
+  config.serve_static_files = false
 
   # Compress JavaScripts and CSS.
   config.assets.js_compressor = :uglifier
@@ -66,12 +66,11 @@ CloudNet::Application.configure do
   # config.action_mailer.raise_delivery_errors = false
 
   # Mailer options for Devise
-  config.action_mailer.default_url_options = { host: 'staging.cloud.net' }
+  config.action_mailer.default_url_options = { host: 'staging.cloud.net', :protocol => 'https' }
   config.action_mailer.delivery_method     = :smtp
   config.action_mailer.perform_deliveries = true
   config.action_mailer.raise_delivery_errors = false
   config.action_mailer.default charset: 'utf-8'
-  config.action_mailer.delivery_method = :smtp
   config.action_mailer.smtp_settings = {
     address: ENV['SMTP_DOMAIN'],
     port: ENV['SMTP_PORT'],
@@ -81,6 +80,8 @@ CloudNet::Application.configure do
     authentication: ENV['SMTP_AUTH_METHOD'],
     domain: 'cloud.net'
   }
+  
+  config.action_mailer.smtp_settings.merge!({ openssl_verify_mode: ENV['SMTP_SSL_VERIFY'] }) unless ENV['SMTP_SSL_VERIFY'].blank?
 
   # Enable locale fallbacks for I18n (makes lookups for any locale fall back to
   # the I18n.default_locale when a translation can not be found).

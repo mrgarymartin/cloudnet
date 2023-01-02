@@ -125,7 +125,7 @@ class InvoicePdf < BillingPdf
   def invoice_payment
     items = [
       ['Invoice Payment'],
-      ['Payment for your invoice will be processed against your specified credit card and any balance which you may have remaining']
+      ['Payment for your invoice will be processed against your remaining Wallet balance']
     ]
 
     table items, width: bounds.width, cell_style: { border_widths: [1] * 4, border_colors: ['999999'] * 4 } do
@@ -140,6 +140,11 @@ class InvoicePdf < BillingPdf
   end
 
   def invoice_item(item)
+    if item.source_type == 'Server'
+      server = Server.with_deleted.find item.source_id
+      provider = "#{server.location.provider} #{server.location.city}"
+      item.description += " @ #{provider}"
+    end
     desc_items = [[formatted_cell("<b>#{truncate(item.description, length: 60)}</b>")]]
 
     if item.metadata.present?

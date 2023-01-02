@@ -10,15 +10,16 @@ class ServerWizard
 
   ATTRIBUTES = [:location_id, :template_id, :memory, :cpus, :disk_size, :name,
                 :os_type, :card_id, :user, :ip_addresses, :payment_type, :build_errors,
-                :submission_path, :existing_server_id]
+                :submission_path, :existing_server_id, :provisioner_role, :validation_reason,
+                :invoice, :addon_ids, :ssh_key_ids]
   attr_accessor(*ATTRIBUTES)
 
   attr_reader :hostname
 
-  validates :location_id, presence: true, if: :step1?
-  validate :is_valid_location, if: :step1?
+  validates :location_id, presence: true , if: :step2?
+  validate :is_valid_location, if: :step2?
   # validate :no_two_vms_in_same_location, if: :step1?
-  validate :reset_template_for_location_if_invalid, if: :step1?
+  validate :reset_template_for_location_if_invalid, if: :step2?
 
   validates :template_id, :memory, :cpus, :disk_size, :name, presence: true, if: :step2?
   validate :is_valid_template, if: :step2?
@@ -28,8 +29,10 @@ class ServerWizard
   validates :name, length: { minimum: 2, maximum: 48 }, if: :step2?
   validates_with HostnameValidator, if: :step2?
 
-  validate :valid_card?, if: :step3?
-  validate :enough_payg_credit?, if: :step3?
+  validate :has_confirmed_email?, if: :step3?
+  validate :validate_wallet_credit, if: :step3?
+  validate :validate_provisioner_template, if: :step2?
+  validate :ssh_key_install, if: :step2?
 
   validates :payment_type, inclusion: { in: %w(prepaid payg) }
 
@@ -43,9 +46,8 @@ class ServerWizard
     end
   end
 
-
-  def self.total_steps
-    3
+  def total_steps
+    (enough_wallet_credit? && user.confirmed?) ? [current_step, 2].max : 3
   end
 
   def current_step_name
@@ -77,12 +79,16 @@ class ServerWizard
     true
   end
 
+  def no_errors?
+    errors.messages.count == 0
+  end
+
   def location
-    @location = Location.where(hidden: false).find_by_id(location_id) if location_id
+    @location ||= Location.find_by_id(location_id) if location_id
   end
 
   def template
-    @template = Template.where(hidden: false, location_id: location_id).find_by_id(template_id) if location && template_id
+    @template ||= Template.where(location_id: location_id).find_by_id(template_id) if location && template_id
     @template
   end
 
@@ -95,12 +101,17 @@ class ServerWizard
   end
 
   def card
-    @card = BillingCard.where(account: user.account).find_by_id(card_id)
+    @card ||= BillingCard.where(account: user.account).find_by_id(card_id)
     @card
   end
 
   def card=(card)
-    self.card_id = card.id
+    self.card_id = card.try(:id)
+  end
+  
+  def addons
+    @addons ||= Addon.where(id: addon_ids) unless addon_ids.blank?
+    @addons || []
   end
 
   def payment_type
@@ -138,8 +149,10 @@ class ServerWizard
       template:               template,
       location:               location,
       bandwidth:              bandwidth,
-      primary_ip_address:     CreateServer.extract_ip(server),
-      payment_type:           payment_type.to_sym
+      payment_type:           'prepaid',
+      provisioner_role:       provisioner_role,
+      validation_reason:      validation_reason,
+      addon_ids:              addon_ids
     )
   end
 
@@ -148,40 +161,71 @@ class ServerWizard
   end
 
   def edit_server(old_server_specs)
-    @old_server_specs = old_server_specs
+    set_old_server_specs(old_server_specs)
     create_or_edit_server(:edit)
   end
 
+  def resources_changed?
+    @resources_changed ||= server_name_changed_only? ? false : server_changed? || addons_changed? || ip_addresses_changed?
+  end
+
+  # Returns Server object for type = :create and true for :edit
   def create_or_edit_server(type = :create)
-    if type == :edit
+    if type == :edit && resources_changed?
       # Issue a credit note for the server's old specs for the time remaining during this
       # invoicable month. We will then charge them for the newly resized server as if it were
       # new.
       @credit_note_for_time_remaining = @old_server_specs.create_credit_note_for_time_remaining
     end
-    # Calculate how much to charge for this server. Calculates time remaining in month and
-    # user's credit notes. Does not actually make the charge, that happens later.
-    auth_charge
 
     if type == :create
+      # Generate invoice, use credit notes if any, finally charge payment receipts
+      charge_wallet
       # Build the server through the Onapp API
       request_server_build
+      charging_paperwork
+      @newly_built_server
     else
+      # Generate invoice, use credit notes if any, finally charge payment receipts
+      charge_wallet if resources_changed?
       # Edit the server through the Onapp API
       request_server_edit
+      charging_paperwork if resources_changed?
+      true
     end
-
-    # Actually make the charge against a card and fill in the relevant paperwork
-    make_charge
-
-    @newly_built_server
   rescue WizardError
     nil # Simply a means to abort the server creation process at any point
   ensure
     if @build_errors.length > 0
-      @credit_note_for_time_remaining.destroy if @credit_note_for_time_remaining
-      CreditNote.refund_used_notes(@notes_used)
-      user.account.create_activity :refund_used_notes, owner: user, params: { notes: @notes_used }
+      # Refund any payment receipts used
+      if @payment_receipts_used.present?
+        PaymentReceipt.refund_used_notes(@payment_receipts_used)
+        user.account.create_activity :refund_used_payment_receipts, owner: user, params: { notes: @payment_receipts_used }
+      end
+
+      # Refund any credit notes used
+      if @notes_used.present?
+        CreditNote.refund_used_notes(@notes_used)
+        user.account.create_activity :refund_used_notes, owner: user, params: { notes: @notes_used }
+      end
+
+      # Clean up the lingering invoice and server
+      if @invoice
+        @invoice.save
+        @invoice.really_destroy!
+      end
+
+      # Delete any credit notes given for server edit
+      if @credit_note_for_time_remaining
+        @credit_note_for_time_remaining.destroy
+        user.account.create_activity :delete_credit_note, owner: user, params: { notes: @credit_note_for_time_remaining }
+      end
+
+      # Undo server creation
+      @newly_built_server.destroy if @newly_built_server
+
+      # Expire cache if any
+      user.account.expire_wallet_balance
     end
   end
 
@@ -192,15 +236,13 @@ class ServerWizard
       @build_errors.push('Could not create server on remote system. Please try again later')
       fail WizardError
     end
-
     @newly_built_server = save_server_details(remote, user)
-  rescue Faraday::Error::ClientError => e
+  rescue Faraday::Error::ClientError, StandardError => e
     ErrorLogging.new.track_exception(
       e,
       extra: {
         current_user: user,
-        source: 'CreateServerTask',
-        faraday: e.response
+        source: 'CreateServerTask'
       }
     )
     @build_errors.push('Could not create server on remote system. Please try again later')
@@ -208,7 +250,53 @@ class ServerWizard
   end
 
   def request_server_edit
-    ServerTasks.new.perform(:edit, user.id, existing_server_id)
+    return unless server_changed?
+
+    ServerEdit.perform_async(user.id, existing_server_id,
+              disk_resize, template_reload, cpu_mem_changes)
+  end
+
+  # TODO: old_server_spec can be taken from onapp API
+  def disk_resize
+    disk_size == @old_server_specs.disk_size ? false : @old_server_specs.disk_size
+  end
+
+  def template_reload
+    template_id == @old_server_specs.template_id ? false : template_id
+  end
+
+  def cpu_mem_changes
+    changed = @old_server_specs.cpus != cpus ||
+              @old_server_specs.memory != memory ||
+              @old_server_specs.name != name
+    changed ? old_server_cpu_mem : false
+  end
+
+  def server_name_changed_only?
+    !template_reload &&
+    !disk_resize &&
+    @old_server_specs.cpus == cpus &&
+    @old_server_specs.memory == memory &&
+    @old_server_specs.name != name
+  end
+
+  def old_server_cpu_mem
+    { "cpus" => @old_server_specs.cpus,
+      "memory" => @old_server_specs.memory,
+      "name" => @old_server_specs.name
+    }
+  end
+  
+  def addons_changed?
+    @old_server_specs.addon_ids.map(&:to_i).uniq.sort != addon_ids.map(&:to_i).uniq.sort
+  end
+
+  def server_changed?
+    cpu_mem_changes || template_reload || disk_resize
+  end
+
+  def ip_addresses_changed?
+    @old_server_specs.ip_addresses != ip_addresses
   end
 
   def persisted?
@@ -228,20 +316,21 @@ class ServerWizard
   end
 
   def can_create_new_server?
-    number_of_servers = user.servers.count
-    number_of_servers < user.vm_max
+    user.servers.count < user.vm_max
   end
 
   def has_minimum_resources?
     minimum = minimum_resources
-    max = remaining_server_resources
-    max.each { |k, v| return false if minimum[k] > v }
+    remaining_resources = remaining_server_resources
+    remaining_resources.delete(:vms)
+    remaining_resources.each { |k, v| return false if minimum[k] > v }
     true
   end
 
   def packages
+    return nil unless location
     packages = location.packages
-    packages.select { |package| has_enough_remaining_resources?(package) }
+    packages.select { |package| @user ? has_enough_remaining_resources?(package) : true }
   end
 
   def bandwidth
@@ -270,6 +359,23 @@ class ServerWizard
     matches
   end
 
+  def enough_wallet_credit?
+    return false if template.nil?
+    return false if user.nil?
+    server = Server.find existing_server_id if !existing_server_id.nil?
+    coupon_percentage = user.account.coupon.present? ? user.account.coupon.percentage_decimal : 0
+    if server
+      credit = server.generate_credit_item(CreditNote.hours_till_next_invoice(user.account))
+      net_cost = credit[:net_cost] * (1 - coupon_percentage)
+      net_cost = 0 if server.in_beta?
+    else
+      net_cost = 0
+    end
+
+    billable_today = cost_for_hours(Invoice.hours_till_next_invoice(user.account)) * (1 - coupon_percentage)
+    (billable_today.to_f == 0.0) || (((user.account.remaining_balance * -1) + net_cost).to_f >= billable_today.to_f)
+  end
+
   private
 
   def wizard_params
@@ -278,6 +384,7 @@ class ServerWizard
 
   def has_enough_remaining_resources?(package)
     max = remaining_server_resources
+    max.delete(:vms)
     max.each { |k, v| return false if package.send(k.to_sym) > v }
     true
   end
@@ -296,6 +403,7 @@ class ServerWizard
 
   def is_valid_location
     errors.add(:location, 'does not exist') if location.nil?
+    errors.add(:location, 'is unavailable') if !location.nil? && existing_server_id.nil? && location.hidden?
   end
 
   def is_valid_template
@@ -306,17 +414,19 @@ class ServerWizard
     template = self.template
     min_resources = minimum_resources
     return false if template.nil?
+    min_memory = [template.min_memory, min_resources[:memory]].max
+    min_disk_size = [template.min_disk, min_resources[:disk_size]].max
 
-    if memory.to_i < template.min_memory
-      errors.add(:memory, "is not enough for the template selected. The template needs a minimum of #{template.min_memory} MB")
+    if memory.to_i < min_memory
+      errors.add(:memory, "needs a minimum of #{min_memory} MB")
     end
 
-    if disk_size.to_i < template.min_disk
-      errors.add(:disk_size, "is not enough for the template selected. The template needs a minimum of #{template.min_disk} GB")
+    if disk_size.to_i < min_disk_size
+      errors.add(:disk_size, "needs a minimum of #{min_disk_size} GB")
     end
 
     if cpus.to_i < min_resources[:cpus]
-      errors.add(:cpus, "need a minimum of #{min_resources[:cpus]} CPU Core(s)")
+      errors.add(:cpus, "needs a minimum of #{min_resources[:cpus]} CPU Core(s)")
     end
   end
 
@@ -327,52 +437,74 @@ class ServerWizard
       errors.add(:memory, "is limited to a total of #{user.memory_max} MB across all servers. Please contact support to get this limit increased")
     end
 
-    # if cpus.to_i > resources[:cpus]
-    #   errors.add(:cpus, "are limited to a total of #{user.cpu_max} Cores across all servers")
-    # end
+    if cpus.to_i > resources[:cpus]
+      errors.add(:cpus, "are limited to a total of #{user.cpu_max} Cores across all servers")
+    end
 
     if disk_size.to_i > resources[:disk_size]
       errors.add(:disk_size, "is limited to a total of #{user.storage_max} GB across all servers. Please contact support to get this limit increased")
     end
+
+    # check only for new server creations
+    if existing_server_id.nil? && resources[:vms] < 1
+      errors.add(:vms, "are limited to a total of #{user.vm_max}. Please contact support to get this limit increased")
+    end
   end
 
   def minimum_resources
-    { memory: 128, cpus: 1, disk_size: 6 }
+    { memory: 512, cpus: 1, disk_size: 20 }
   end
 
   def remaining_server_resources
-    servers = user.servers
-    memory_used = servers.map(&:memory).reduce(:+) || 0
-    storage_used = servers.map(&:disk_size).reduce(:+) || 0
+    if user
+      servers = user.servers
+      memory_used = servers.map(&:memory).reduce(:+) || 0
+      storage_used = servers.map(&:disk_size).reduce(:+) || 0
+      cpu_used = servers.map(&:cpus).reduce(:+) || 0
 
-    {
-      memory:       user.memory_max - memory_used,
-      cpus:         user.cpu_max,
-      disk_size:    user.storage_max - storage_used
-    }
+      {
+        memory:       user.memory_max - memory_used,
+        cpus:         user.cpu_max - cpu_used,
+        disk_size:    user.storage_max - storage_used,
+        vms:          user.vm_max - servers.count
+      }
+    else
+      { memory: 7680, cpus: 4, disk_size: 100, vms: 3 }
+    end
   end
 
   def within_package_if_budget_vps_package
-    return true unless location.budget_vps?
+    return false unless location
+    return true if !location.budget_vps? #&& !existing_server_id.nil?
 
     matches = false
     packages.each do |package|
       matches = true if matches_package?(package)
     end
 
-    errors.add(:base, "This location requires a package to be chosen (or the template you've chosen is incompatible with this package)") unless matches
+    errors.add(:base, "Please select a package (or the template you've chosen is incompatible with this package)") unless matches
     matches
   end
 
-  def valid_card?
-    if prepaid? && !card.present?
-      errors.add(:base, 'Card is not valid or not present')
+  def validate_wallet_credit
+    errors.add(:base, 'You do not have enough credit to run this server until next invoice date. Please top up your Wallet.') unless enough_wallet_credit?
+  end
+
+  def validate_provisioner_template
+    if !provisioner_role.blank? && template_id.to_s != location.provisioner_templates.first.id.to_s
+      errors.add(:base, 'Invalid template for provisioner')
     end
   end
 
-  def enough_payg_credit?
-    if payg? && user.account.payg_server_days(self) < 1
-      errors.add(:base, 'You do not have enough PAYG credit to run this server for more than 24 hours. Please add more PAYG credit')
-    end
+  def has_confirmed_email?
+    errors.add(:base, 'Please confirm your email address before creating a server') if user && !user.confirmed?
+  end
+  
+  def ssh_key_install
+    errors.add(:base, 'SSH keys are invalid for selected template') if !ssh_key_ids.blank? && !template.blank? && key_install_unsupported?
+  end
+  
+  def key_install_unsupported?
+    %w(windows freebsd).any? { |os| template.os_type.include? os }
   end
 end

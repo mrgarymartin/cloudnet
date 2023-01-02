@@ -39,17 +39,23 @@ module CloudNet
       server_wizards/locations.js
       server_wizards/resources.js
       server_wizards/confirmation.js
+      server_wizards/payg_confirmation.js
+      intlTelInput/utils.js
     )
 
     config.i18n.enforce_available_locales = true
     config.autoload_paths += Dir["#{config.root}/lib/**/"]
 
+    config.paths.add File.join('app', 'api'), glob: File.join('**', '*.rb')
+    config.autoload_paths += Dir["#{config.root}/app/api/**/"]
 #    require 'dev_database_switch'
 #    include DevDatabaseSwitch
     config.generators do |g|
       g.test_framework :rspec
     end
-    
+
+    config.middleware.insert_before 0, 'Rack::Attack'
+
     config.after_initialize do
       require 'devise_otp_redirect_patch'
     end

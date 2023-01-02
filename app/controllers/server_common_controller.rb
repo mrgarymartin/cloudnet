@@ -3,7 +3,7 @@ class ServerCommonController < ApplicationController
 
   # When the Server Wizard is setup at a step after step 1
   def process_server_wizard
-    @wizard = ModelWizard.new(ServerWizard, user_session, params, :server_wizard).process
+    @wizard = ModelWizard.new(ServerWizard, session, params, :server_wizard).process
     @wizard_object = @wizard.object
     @wizard_object.user = current_user
   end
@@ -31,16 +31,31 @@ class ServerCommonController < ApplicationController
   end
 
   def payg
+    server = Server.find(params[:id]) if params[:id]
     process_server_wizard
-
+    if server
+      @wizard_object.location_id = server.location_id
+      @wizard_object.template_id = server.template.id
+      @wizard_object.existing_server_id = server.id
+    end
     render partial: 'billing/payg_details', locals: { payg: payg_details, wizard: @wizard_object }
   end
 
   private
 
   def step2
-    @templates = Location.find(@wizard_object.location_id).templates.where(hidden: false).group_by { |t| "#{t.os_type}-#{t.os_distro}" }
-    Analytics.track(current_user, event: 'Server Wizard Step 2', properties: { location: @wizard_object.location.to_s })
+    @regions = Region.active
+    @locations = Location.all.where(hidden: false)
+    @templates = Location.find(@wizard_object.location_id).templates.where(hidden: false).where.not(os_distro: 'docker').group_by { |t| "#{t.os_type}-#{t.os_distro}" } unless @wizard_object.location_id.blank?
+    Analytics.track(current_user, event_details_step2, anonymous_id, request)
+  end
+
+  def event_details_step2
+    {event: 'New Server - Options',
+      properties: {
+        location: @wizard_object.location.to_s
+      }.merge(UtmTracker.extract_properties(params))
+    }
   end
 
   def step3
@@ -48,7 +63,7 @@ class ServerCommonController < ApplicationController
 
     Analytics.track(
       current_user,
-      event: 'Server Wizard Step 3',
+      event: 'New Server - Billing Options',
       properties: {
         location: @wizard_object.location.to_s,
         template: @wizard_object.template.to_s,
@@ -87,23 +102,24 @@ class ServerCommonController < ApplicationController
   end
 
   def payg_details
-    a = current_user.account
-    { balance: a.payg_balance, available: a.available_payg_balance, used: a.used_payg_balance }
   end
 
   def track_analytics_for_server(server)
+    role = server.provisioner_role
+    postfix = role ? 'Provisioned' : 'Created Server'
     Analytics.track(
       current_user,
-      event: 'Server Wizard Created Server',
+      event: "New Server - #{postfix}",
       properties: {
         location: @wizard_object.location.to_s,
         template: @wizard_object.template.to_s,
-        server: "#{server.memory}MB RAM, #{server.disk_size}GB Disk, #{server.cpus} Cores"
+        server: "#{server.memory}MB RAM, #{server.disk_size}GB Disk, #{server.cpus} Cores",
+        provisioned: role
       }
     )
   end
 
   def wizard_params
-    params.require(:server_wizard).permit(:location_id, :os_distro_id, :template_id, :memory, :cpus, :disk_size, :bandwidth, :hostname, :name, :card_id, :ip_addresses)
+    params.require(:server_wizard).permit(:location_id, :os_distro_id, :template_id, :memory, :cpus, :disk_size, :bandwidth, :hostname, :name, :card_id, :ip_addresses, :provisioner_role, :addon_ids, :ssh_key_ids)
   end
 end

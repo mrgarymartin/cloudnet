@@ -15,11 +15,4 @@ module ServerWizardsHelper
     max_updated_at = Location.maximum(:updated_at).try(:utc).try(:to_s, :number) || 0
     "locations/all-#{max_updated_at}"
   end
-  
-  # sliders when
-  # no vps AND no package choosen AND values in url params
-  def activate_slider_tab
-    @server or
-    (!@wizard_object.location.budget_vps and !@wizard_object.package_matched and @wizard_object.params_values?)
-  end
 end

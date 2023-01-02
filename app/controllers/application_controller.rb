@@ -3,12 +3,17 @@ class ApplicationController < ActionController::Base
   # For APIs, you may want to use :null_session instead.
   protect_from_forgery with: :exception
 
+  MONITOR_SERV = %w(bot spider crawl scraper indexer Zabbix NewRelicPinger UptimeRobot DomainTuno Baiduspider HaosouSpider Googlebot MJ12bot Slurp Feedfetcher SkypeUriPreview Exabot bingbot CCBot DuckDuckGo favicon wget Snippet_Validator HubSpot WinHttp)
+
   before_filter :configure_permitted_parameters, if: :devise_controller?
   before_action :authenticate_user!
   before_action :check_user_status, unless: :controller_allowed?
-
+  before_action :set_session_id
+  
   helper_method :is_admin_user?
   helper_method :logged_in_as?
+  helper_method :has_stripe?
+  helper_method :can_send_sms?
 
   def is_admin_user?
     current_user && current_user.admin?
@@ -33,6 +38,14 @@ class ApplicationController < ActionController::Base
 
   def redirect_to_dashboard
     redirect_to root_path
+  end
+  
+  def has_stripe?
+    PAYMENTS[:stripe][:api_key].present?
+  end
+  
+  def can_send_sms?
+    KEYS[:nexmo][:api_key].present?
   end
 
   protected
@@ -65,11 +78,17 @@ class ApplicationController < ActionController::Base
       'An error occured. Could not complete action'
     end
   end
+  
+  def create_sift_event(event, properties)
+    CreateSiftEvent.perform_async(event, properties)
+  rescue StandardError => e
+    ErrorLogging.new.track_exception(e, extra: { user: current_user.id, source: 'ApplicationController#create_sift_event' })
+  end
 
   private
 
   def controller_allowed?
-    controllers = %w(tickets ticket_replies public server_search)
+    controllers = %w(tickets ticket_replies public server_search server_wizards locations)
     devise_controller? || controllers.include?(params[:controller])
   end
 
@@ -78,4 +97,21 @@ class ApplicationController < ActionController::Base
       render 'app/suspended'
     end
   end
+  
+  def anonymous_id
+    session.id
+  end
+
+  def set_session_id
+    Thread.current[:session_id] = anonymous_id
+  end
+  
+  def monitoring_service?
+    MONITOR_SERV.any? {|serv| /#{serv}/i =~ request.user_agent}
+  end
+  
+  def after_sign_out_path_for(resource_or_scope)
+    root_path(logout: 1)
+  end
+  
 end

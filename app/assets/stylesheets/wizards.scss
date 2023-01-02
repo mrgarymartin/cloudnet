@@ -160,7 +160,7 @@ i.small {
         a {
           border: 0;
           background: rgba(255, 255, 255, .8);
-          
+
         }
       }
     }
@@ -227,6 +227,10 @@ ul.nav.nav-tabs {
 
 .edit-server-warning {
   display: block;
+  ul {
+    margin: 0;
+    margin-left: 30px;
+  }
 }
 
 .resources-total {
@@ -253,8 +257,23 @@ ul.nav.nav-tabs {
   .resources-billing-date {
     text-align: right;
   }
-  
+
 }
+
+.ip-resources-total {
+  font-size: $fourteen;
+  margin: 0 0 15px 0;
+
+  .total-cost {
+    color: $jg-green;
+  }
+
+  span {
+    display: inline;
+  }
+
+}
+
 
 .templates-total {
   font-size: $fourteen;
@@ -268,7 +287,7 @@ ul.nav.nav-tabs {
   span {
     padding: 0 3px 0 0;
   }
-  
+
 }
 
 .form-group {
@@ -357,7 +376,7 @@ ul.nav.nav-tabs {
           color:        #505050;
           font-weight:  bold;
           margin:       0;
-          
+
         }
 
       }// dl

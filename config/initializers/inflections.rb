@@ -14,3 +14,10 @@
 # ActiveSupport::Inflector.inflections(:en) do |inflect|
 #   inflect.acronym 'RESTful'
 # end
+
+ActiveSupport::Inflector.inflections do |inflect|
+  inflect.acronym "MySQL"
+  inflect.acronym "MongoDB"
+  inflect.acronym "NodeBB"
+  inflect.acronym "WordPress"
+end

@@ -1,9 +1,15 @@
 - breadcrumb :dashboard
 - title "Dashboard"
 
-%script
-  - r = render partial: 'stats.json', formats: [:json], locals: { stats: @stats }
-  = raw "var stats = #{r}" 
+- cache(cache_key_for_dashboard('views'), expires_in: 12.hours) do
+  %script
+    - r = render partial: 'stats.json', formats: [:json], locals: { stats: @stats }
+    = raw "var stats = #{r}" 
+
+- if current_user && current_user.trial_credit_eligible?
+  %div.alert.alert-info
+    = "Add a credit card and get $#{CreditNote::TRIAL_CREDIT} as credits in your Wallet for free! Your card won't be charged."
+    = link_to 'Get free credit', billing_index_path(anchor: "add-new-card")
 
 %ul.dashboard-stats.pure-g
   %li.pure-u-1.pure-u-md-1-2
@@ -73,12 +79,8 @@
       .jg-widget-header.pure-g.clearfix
         %h2.pure-u-1-2.jg-icon.icon-tickets CPU Usage
         %ul.pure-u-1-2.jg-widget-controls
-          %li
-            %a 24 Hours
           %li.current
-            %a 7 Days
-          %li
-            %a 30 Days
+            %a 24 Hours
       .jg-widget-body
         .jg-chart.linechart
         %div{ :style => "clear:both" }

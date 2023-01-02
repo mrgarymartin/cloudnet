@@ -27,7 +27,14 @@
         %span.unit-box
           = f.text_field :cpus, class: 'form-control wizard-text-box'
           %span.unit="Core(s)"
-  .form-group.pure-u-1.disk-slider{:class => ("disabled" if @server)}
+  .form-group.pure-u-1.disk-slider{:class => ("disabled" if @server && @server.template.os_distro.match(/bsd/))}
+    - if @server
+      %em.pure-u-1.alert.alert-warning.edit-server-warning
+        %strong WARNING!
+        %ul
+          %li Decreasing disk size can lead to filesystem inconsistencies.
+          %li You can not decrease disk size for Windows-based servers.
+          %li Disk resizing is not supported at all on FreeBSD servers.
     .pure-g
       .pure-u-1.pure-u-md-1-5
         .resource-unit
@@ -48,5 +55,7 @@
         %span.resource-value#inclusive-bandwidth
         %span.resource Inclusive Bandwidth
       %li.pure-u-1-2
-        %span.resource-value#inclusive-ip-address 1 IP
-        %span.resource Allocated IP Address
+        - #ips_count = @server ? @server.ip_addresses : 1
+        = f.hidden_field :ip_addresses #, value: ips_count
+        %span.resource-value#inclusive-ip-address= pluralize(@wizard_object.ip_addresses, "IP")
+        %span.resource Allocated IP Addresses

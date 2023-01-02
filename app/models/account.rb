@@ -1,7 +1,8 @@
 class Account < ActiveRecord::Base
   include PublicActivity::Common
   include Account::Couponable
-  include Account::Payg
+  include Account::Wallet
+  include Account::FraudValidator
 
   acts_as_paranoid
 
@@ -11,6 +12,8 @@ class Account < ActiveRecord::Base
   has_many :payment_receipts, dependent: :destroy
   has_many :billing_cards, dependent: :destroy
   has_many :server_hourly_transactions, dependent: :destroy
+  has_many :risky_ip_addresses
+  has_many :risky_cards
 
   before_create :set_invoice_start_day
   before_create :create_payment_gateway_user
@@ -21,6 +24,7 @@ class Account < ActiveRecord::Base
   RISKY_CARDS_ALLOWED = 3
   COUPON_LIMIT_MONTHS = 6.months
 
+  default_scope { joins(:user).where.not(users: {suspended: true}) }
   scope :invoice_day, lambda { |date| where(invoice_day: date.day) }
 
   def hours_till_next_invoice(from_time=Time.now, today=Time.now)
@@ -28,8 +32,8 @@ class Account < ActiveRecord::Base
     ((due_date - from_time) / 1.hour).ceil.abs
   end
 
-  def hours_since_past_invoice
-    due_date = past_invoice_due
+  def hours_since_past_invoice(today=Time.now)
+    due_date = past_invoice_due(today)
     ((Time.now - due_date) / 1.hour).ceil.abs
   end
 
@@ -82,12 +86,11 @@ class Account < ActiveRecord::Base
   end
 
   def calculate_risky_card(result)
-    case result
-    when :rejected
-      update!(risky_cards_remaining: risky_cards_remaining - 1)
-    else
-      update!(risky_cards_remaining: RISKY_CARDS_ALLOWED)
-    end
+    update!(risky_cards_remaining: risky_cards_remaining - 1) if result == :rejected
+  end
+
+  def risky_card_attempts
+    RISKY_CARDS_ALLOWED - risky_cards_remaining
   end
 
   def vat_exempt?
@@ -136,21 +139,10 @@ class Account < ActiveRecord::Base
   end
 
   def primary_billing_card
-    cards = billing_cards.processable
-    return (cards.find(&:primary?) || cards.first) if cards.present?
-    nil
-  end
-
-  def remaining_invoice_balance
-    invoices.to_a.sum(&:remaining_cost)
-  end
-
-  def remaining_credit_balance
-    credit_notes.to_a.sum(&:remaining_cost)
-  end
-
-  def remaining_balance
-    remaining_invoice_balance - remaining_credit_balance
+    @primary_billing_card ||= begin
+      cards = billing_cards.processable
+      cards.present? ? (cards.find(&:primary?) || cards.first) : nil
+    end
   end
 
   def self.in_gb?(code)
@@ -159,6 +151,22 @@ class Account < ActiveRecord::Base
 
   def self.in_eu?(code)
     %w(AT BE BG HR CY CZ DK EE FI FR DE EL HU IE IT LV LT LU MT NL PL PT RO SK SI ES SE).include?(code)
+  end
+
+  def valid_top_up_amounts(ip = nil)
+    if !fraud_safe?(ip)
+      Payg::VALID_TOP_UP_AMOUNTS.first(1)
+    else
+      Payg::VALID_TOP_UP_AMOUNTS
+    end
+  end
+
+  def max_minfraud_score
+    billing_cards.map{|card| card.fraud_score.round(2).to_f unless card.fraud_score.nil?}.compact.max
+  end
+
+  def coupon_expires_at
+    coupon_activated_at + coupon.duration_months.months
   end
 
   private
@@ -176,6 +184,6 @@ class Account < ActiveRecord::Base
   end
 
   def create_payment_gateway_user
-    self.gateway_id ||= Payments.new.create_customer(user)
+    self.gateway_id ||= Payments.new.create_customer(user) if PAYMENTS[:stripe][:api_key].present?
   end
 end

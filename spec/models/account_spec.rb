@@ -7,6 +7,11 @@ describe Account do
     expect(user.account).to be_valid
   end
 
+  it 'should not include suspended users in its default scope' do
+    user.update! suspended: true
+    expect(Account.count).to eq 0
+  end
+
   describe 'Invoicing Start and Invoicing Day' do
     it 'should set an invoicing start and invoicing day' do
       expect(user.account.invoice_day).to be_present
@@ -113,28 +118,28 @@ describe Account do
 
     describe 'Number of hours till next invoice' do
       it 'should give us the ceiling number for hours left' do
-        Timecop.freeze Time.now.change(day: 25, month: 1, hour: 1, min: 15) do
+        Timecop.freeze Time.zone.now.change(day: 25, month: 1, hour: 1, min: 15) do
           account = FactoryGirl.create(:account, invoice_day: 26)
           expect(account.hours_till_next_invoice).to eq(24)
         end
       end
 
       it "should give us the a number of hours if we've passed it" do
-        Timecop.freeze Time.now.change(day: 25, month: 1, hour: 1) do
+        Timecop.freeze Time.zone.now.change(day: 25, month: 1, hour: 1) do
           account = FactoryGirl.create(:account, invoice_day: 24)
           expect(account.hours_till_next_invoice).to eq(30 * 24)
         end
       end
 
       it "should give us at least 1 hour even if it's less than that left" do
-        Timecop.freeze Time.now.change(day: 25, month: 1, hour: 0, min: 15) do
+        Timecop.freeze Time.zone.now.change(day: 25, month: 1, hour: 0, min: 15) do
           account = FactoryGirl.create(:account, invoice_day: 25)
-          expect(account.hours_till_next_invoice).to eq(1)
+          expect(account.hours_till_next_invoice(Time.zone.now, Time.zone.now)).to eq(1)
         end
       end
 
       it "should give us the ceiling if we've just passed invoice day and time" do
-        Timecop.freeze Time.now.change(day: 25, month: 1, hour: 1, min: 0, sec: 1) do
+        Timecop.freeze Time.zone.now.change(day: 25, month: 1, hour: 1, min: 0, sec: 1) do
           account = FactoryGirl.create(:account, invoice_day: 25)
           expect(account.hours_till_next_invoice).to eq(31 * 24)
         end
@@ -143,28 +148,28 @@ describe Account do
 
     describe 'Number of hours since past invoice' do
       it "should give us the past date hours if the invoice day is today and it's before 1am" do
-        Timecop.freeze Time.now.change(day: 26, month: 2, hour: 0, min: 15) do
+        Timecop.freeze Time.zone.now.change(day: 26, month: 2, hour: 0, min: 15) do
           account = FactoryGirl.create(:account, invoice_day: 26)
-          expect(account.hours_since_past_invoice).to eq(31 * 24)
+          expect(account.hours_since_past_invoice(Time.zone.now)).to eq(31 * 24)
         end
       end
 
       it 'should give us the past date hours if the invoice day has not passed' do
-        Timecop.freeze Time.now.change(day: 25, month: 2, hour: 1) do
+        Timecop.freeze Time.zone.now.change(day: 25, month: 2, hour: 1) do
           account = FactoryGirl.create(:account, invoice_day: 26)
           expect(account.hours_since_past_invoice).to eq(30 * 24)
         end
       end
 
       it "should give us 1 hour if invoice day is today but it's past 1am" do
-        Timecop.freeze Time.now.change(day: 25, month: 1, hour: 1, min: 0, sec: 3) do
+        Timecop.freeze Time.zone.now.change(day: 25, month: 1, hour: 1, min: 0, sec: 3) do
           account = FactoryGirl.create(:account, invoice_day: 25)
           expect(account.hours_since_past_invoice).to eq(1)
         end
       end
 
       it "should give us today's hours if invoice day for this month has passed" do
-        Timecop.freeze Time.now.change(day: 25, month: 1, hour: 6, min: 0, sec: 0) do
+        Timecop.freeze Time.zone.now.change(day: 25, month: 1, hour: 6, min: 0, sec: 0) do
           account = FactoryGirl.create(:account, invoice_day: 25)
           expect(account.hours_since_past_invoice).to eq(5)
         end
@@ -245,12 +250,6 @@ describe Account do
       account = user.account
       expect { account.calculate_risky_card(:rejected) }.to change { account.risky_cards_remaining }.by(-1)
     end
-
-    it 'should reset the risky cards allowed if I send a rejected report and then an accepted' do
-      account = user.account
-      expect { account.calculate_risky_card(:rejected) }.to change { account.risky_cards_remaining }.by(-1)
-      expect { account.calculate_risky_card(:accepted) }.to change { account.risky_cards_remaining }.to(Account::RISKY_CARDS_ALLOWED)
-    end
   end
 
   describe 'Billing country and Billing address' do
@@ -279,6 +278,11 @@ describe Account do
       expect(user.account.set_coupon_code(coupon.coupon_code)).to be true
     end
 
+    it 'returns true if expiry coupon date is today' do
+      coupon = FactoryGirl.create(:coupon, expiry_date: Date.today)
+      expect(user.account.set_coupon_code(coupon.coupon_code)).to be true
+    end
+    
     it 'should return false if attempted to set an invalid coupon code' do
       coupon = FactoryGirl.create(:coupon)
       expect(user.account.set_coupon_code('NOTVALID')).to be false
@@ -301,6 +305,90 @@ describe Account do
         user.account.coupon_activated_at = Time.now - Account::COUPON_LIMIT_MONTHS + 1.second
         expect(user.account.can_set_coupon_code?).to be false
       end
+    end
+    
+    context 'expired coupon' do
+      it 'does not set inactive coupon coupon' do
+        coupon = FactoryGirl.create(:coupon, active: false)
+        expect(user.account.set_coupon_code(coupon.coupon_code)).to be false
+      end
+      
+      it 'does not set expired coupon coupon' do
+        coupon = FactoryGirl.create(:coupon, expiry_date: Date.today - 1.day)
+        expect(user.account.set_coupon_code(coupon.coupon_code)).to be false
+      end
+    end
+  end
+  
+  describe 'Fraud validator' do
+    before :each do
+      allow_any_instance_of(Account).to receive(:card_fingerprints).and_return(['abcd12345'])
+    end
+    
+    it 'should return minfraud as a reason for fraud validation' do
+      card = FactoryGirl.create(:billing_card, account: user.account, fraud_verified: true, fraud_score: 100.0)
+      expect(user.account.fraud_validation_reason('0.0.0.0')).to eq(1)
+    end
+    
+    it 'should fraud validate all billing cards in account' do
+      card_1 = FactoryGirl.create(:billing_card, account: user.account, fraud_verified: true, fraud_score: 10.0)
+      card_2 = FactoryGirl.create(:billing_card, account: user.account, fraud_verified: true, fraud_score: 100.0)
+      expect(user.account.fraud_validation_reason('0.0.0.0')).to eq(1)
+    end
+    
+    it 'should approve if all cards are marked as fraud safe' do
+      card_1 = FactoryGirl.create(:billing_card, account: user.account, fraud_verified: true, fraud_score: 100.0, fraud_safe: true)
+      card_2 = FactoryGirl.create(:billing_card, account: user.account, fraud_verified: true, fraud_score: 100.0, fraud_safe: true)
+      expect(user.account.fraud_validation_reason('0.0.0.0')).to eq(0)
+    end
+    
+    it 'should return IP history as a reason for fraud validation' do
+      RiskyIpAddress.create(ip_address: '0.0.0.0', account: user.account)
+      expect(user.account.fraud_validation_reason('0.0.0.0')).to eq(2)
+    end
+    
+    it 'should return Card history as a reason for fraud validation' do
+      RiskyCard.create(fingerprint: 'abcd12345', account: user.account)
+      expect(user.account.fraud_validation_reason).to eq(5)
+    end
+    
+    it 'should check IP history from billing cards for fraud validation' do
+      RiskyIpAddress.create(ip_address: '0.0.0.0', account: user.account)
+      card = FactoryGirl.create(:billing_card, account: user.account, fraud_verified: true, fraud_score: 10.0, ip_address: '0.0.0.0')
+      expect(user.account.fraud_validation_reason('123.456.789.1')).to eq(2)
+    end
+    
+    it 'should check login from risky IPs for fraud validation' do
+      RiskyIpAddress.create(ip_address: '123.456.888.99', account: user.account)
+      user.current_sign_in_ip, user.last_sign_in_ip = '123.456.888.99', '123.456.888.98'
+      expect(user.account.fraud_validation_reason('123.456.888.99')).to eq(2)
+    end
+    
+    it 'should return risky card attempts as a reason for fraud validation' do
+      user.account.risky_cards_remaining = -1
+      expect(user.account.fraud_validation_reason('0.0.0.0')).to eq(3)
+    end
+    
+    it 'should allow only minimum wallet recharge for suspected fraud accounts' do
+      card = FactoryGirl.create(:billing_card, account: user.account, fraud_verified: true, fraud_score: 100.0)
+      expect(user.account.valid_top_up_amounts).to eq([Payg::VALID_TOP_UP_AMOUNTS.min])
+    end
+    
+    it 'should approve if user is whitelisted' do
+      user.account.update_attribute(:whitelisted, true)
+      user.account.risky_cards_remaining = -1
+      expect(user.account.fraud_validation_reason('0.0.0.0')).to eq(0)
+    end
+  end
+  
+  describe 'update forecasted revenue after coupon change' do
+    it 'recalculates forecasted revenue after setting coupon code' do
+      coupon = FactoryGirl.create(:coupon)
+      user.servers << FactoryGirl.build(:server, memory: 512)
+      user.servers << FactoryGirl.build(:server, memory: 1024)
+      expect(user.forecasted_revenue).to eq 104899200
+      user.account.set_coupon_code(coupon.coupon_code)
+      expect(user.forecasted_revenue).to eq 83919360
     end
   end
 end

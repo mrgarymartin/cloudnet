@@ -1,87 +1,173 @@
-# Rename this file to .env
+## Rename this file to .env.docker
+
+## PRE-CONFIGURED
+
+# Environments
+RACK_ENV=production
+RAILS_ENV=production
+
+# nginx vhosts
+VIRTUAL_HOST=cloudnet-app
+CERT_NAME=server
 
 # Postgres credentials
-DB_USER=
-DB_PORT=
 DB_NAME=cloudnet
+DB_USER=postgres
 DB_PASSWD=
-DB_HOST=
+DB_HOST=cloudnet-db
+DB_PORT=5432
 
-MEMCACHE_URI=localhost:11211
-REDIS_URI=redis://localhost:6379
+MEMCACHE_URI=cloudnet-memcached:11211
+REDIS_URI=redis://cloudnet-redis:6379
 
-# Onapp API
-ONAPP_CP=https://onapp.api.endpoint.com
-ONAPP_USER=
-ONAPP_PASS=
-ONAPP_ROLE=
+## REQUIRED
 
-# Zendesk
-ZENDESK_USER=
-ZENDESK_TOKEN=
-ZENDESK_TRIGGER_USER=
-ZENDESK_TRIGGER_PASS=
-
-# Credit card fraud detection
-MAXMIND_USER=
-MAXMIND_KEY=
-
-# Segment.io custom analytics
-ANALYTICS_KEY=
-
-# Logging
-SENTRY_DSN_URI=http://localhost
-
-# Payments
-STRIPE_API_KEY=
-STRIPE_PUBLISH_KEY=
-
-# Mailtrap: captures mail, so real users don't get spammed.
-# Only needed in non-production environments
-MAILTRAP_USER=
-MAILTRAP_PASS=
+# Host settings
+HOST_DOMAIN=cloud.net
+BRAND_NAME=Cloud.net
 
 # Generate with `rails generate symmetric_encryption:new_keys production`
 SYMMETRIC_ENCRYPTION_KEY=
 
-# Use 'true' if you're hosting on Docker or a PaaS like Heroku
-SERVE_STATIC_ASSETS=
+# Session keys. Generate with `rake secret`
+DEVISE_SECRET_KEY=
+COOKIES_SECRET_BASE=
+
+# Onapp API
+ONAPP_API_ALLOW_INSECURE=false
+ONAPP_CP=https://onapp.api.endpoint.com
+ONAPP_USER=
+ONAPP_PASS=
+ONAPP_ROLE=
+ONAPP_BILLING_PLAN_ID=
+
+# PayPal Config
+PAYPAL_USER=
+PAYPAL_PASS=
+PAYPAL_SIGNATURE=
+
+# Zendesk
+ZENDESK_HOST=
+ZENDESK_USER=
+ZENDESK_TOKEN=
+ZENDESK_TRIGGER_USER=
+ZENDESK_TRIGGER_PASS=
+ZENDESK_CUSTOM_SERVER_KEY=
+ZENDESK_CUSTOM_DEPT_KEY=
+ZENDESK_GROUP_GENERAL=
+ZENDESK_GROUP_BILLING=
+ZENDESK_GROUP_ABUSE=
+ZENDESK_GROUP_SALES=
+ZENDESK_GROUP_OTHER=
+
+# Pingdom
+PINGDOM_KEY=
+PINGDOM_USER=
+PINGDOM_PASS=
+
+# Used to display the map of providers, seen when creating a server
+MAPBOX_TOKEN=
+MAPBOX_PUBLIC_TOKEN=
+
+# Used to display images for provider locations
+FIVEHUNDREDPX_KEY=
 
 # Email provider. Eg; Sendgrid, Mandrill, etc
-SMTP_DOMAIN=
+SMTP_DOMAIN=smtp.your-mail-server.com
 SMTP_PORT=
 SMTP_USER=
 SMTP_PASSWORD=
 SMTP_AUTH_METHOD=
+SMTP_SSL_VERIFY=
 
 # Admin recipients
 MAILER_ADMIN_RECIPIENTS="sample@email.com, joebloggs@website.com"
 # Financial report recipients
 MAILER_ENQUIRY_RECIPIENTS="sample@email.com, joebloggs@website.com"
 MAILER_FINANCE_RECIPIENTS="sample@email.com, joebloggs@website.com"
+MAILER_SUPPORT_MAIN="support@website.com"
+MAILER_SUPPORT_RECIPIENTS="sample@email.com, joebloggs@website.com"
+MAILER_SUPPORT_ESCALATE="ticket-escalate@website.com"
 MAILER_ADMIN_DEFAULT_FROM='Cloud.net Admin <admin@website.com>'
 MAILER_NOTIFICATIONS_DEFAULT_FROM='Cloud.net Notifications <notifications@website.com>'
 MAILER_DEFAULT_WELCOME='Cloud.net <welcome@website.com>'
+MAILER_BILLING='billing@website.com'
+MAILER_CONTACT_MAIN='contact@website.com'
 
 # Appears at the top of PDFs for invoices, credit notes, etc
 PDF_HEADER="Company name\nAddress line 1\nVAT number\netc"
 
-# Used to display images for provider locations
-FIVEHUNDREDPX_KEY=
+## OPTIONAL
 
-# Used to display the map of providers, seen when creating a server
-MAPBOX_TOKEN=
+# Stripe - required to accept credit cards
+STRIPE_API_KEY=
+STRIPE_PUBLISH_KEY=
+STRIPE_API_VERSION=2014-06-17
 
-# Session keys. Generate with `rake secret`
-DEVISE_SECRET_KEY=
-COOKIES_SECRET_BASE=
+# Credit card fraud detection
+MAXMIND_KEY=
+
+# SiftScience - fraud mitigation
+SIFT_SCIENCE_JS_SNIPPET_KEY=
+SIFT_SCIENCE_API_KEY=
+SIFT_SCIENCE_ACCOUNT_ID=
+SIFT_USER_VALIDATE_ACTION_ID=
+SIFT_USER_APPROVE_ACTION_ID=
+
+# Docker provisioner
+DOCKER_PROVISIONER=
+DOCKER_PROVISIONER_USER=
+DOCKER_PROVISIONER_PASS=
+
+# Nexmo - for verifying phone numbers
+NEXMO_API_KEY=
+NEXMO_API_SECRET=
+
+# Use 'true' if you're hosting on Docker or a PaaS like Heroku
+SERVE_STATIC_FILES=
 
 # Google Analytics code
 GA_UA_NUMBER=
 
+#HubSpot CRM
+HUBSPOT_ID=
+
+# Segment.io custom analytics
+ANALYTICS_KEY=
+
+# AdRoll Pixel
+ADROLL_ADV_ID=
+ADROLL_PIX_ID=
+
+# Elevio
+ELEVIO_ACCOUNT_ID=
+
+# Intercom
+INTERCOM_APP_ID=
+INTERCOM_SECRET_KEY=
+INTERCOM_ACCESS_TOKEN=
+
+# New Relic
+NEW_RELIC_KEY=
+
+# Logging
+SENTRY_DSN_URI=http://localhost
+
+# DB Backups
+CRON_SCHEDULE=0 0 * * *
+S3_PATH=s3://bucket-name/path/to/dir
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_DEFAULT_REGION=us-west-1
+# Optional
+# MAIL_TO=backups@example.com
+# MAIL_FROM=admin@example.com
+# WEBHOOK=https://example.com/some/path
+# WEBHOOK_METHOD=GET
+
 # Capistrano deployment config. (Not needed if using Docker installation method)
-GIT_ORIGIN=git@github.com:OnApp/cloudnet.git
-PROD_SERVER1_IP=1.2.3.4
-PROD_SERVER2_IP=1.2.3.4
-STAGING_SERVER1_IP=1.2.3.4
-STAGING_SERVER2_IP=1.2.3.4
+#GIT_ORIGIN=git@github.com:OnApp/cloudnet.git
+#PROD_SERVER1_IP=1.2.3.4
+#PROD_SERVER2_IP=1.2.3.4
+#STAGING_SERVER1_IP=1.2.3.4
+#STAGING_SERVER2_IP=1.2.3.4

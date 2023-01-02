@@ -16,7 +16,9 @@
  *= require bootstrap-editable
  *= require prettify-tomorrow
  *= require markerCluster
+ *= require intlTelInput
  *= require jquery.dataTables
+ *= require magic-check
  *= require_tree .
  */
 

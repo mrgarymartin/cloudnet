@@ -1,9 +1,14 @@
-@app.directive "locationWidget", [ 'Packages', 'ServerSearchState', '$filter',
-(Packages, State, $filter) ->
+@app.directive "locationWidget", [ 'Packages', 'ServerSearchState', '$filter', '$templateCache', '$location'
+(Packages, State, $filter, $templateCache, $location) ->
   templateUrl: "<%= asset_path('templates/server_search/location.html') %>"
   scope: 
     location: '='
   link: (scope, el, attr) ->
+    popup = _.template($templateCache.get "indexChartPopup.html")
+    
+    scope.showMore = ->
+      ~location.href.indexOf('more')
+    
     scope.noPackageActive = ->
       not Packages.activePackage
     
@@ -22,6 +27,9 @@
     scope.cpuPerHour = ->
       pricingMessage(scope.location?.fPriceCpu())
       
+    scope.freeBandwidthPerMonth = ->
+      scope.location?.freeBandwidth(State.counts) + " GB/month"
+      
     scope.provision = ->
       document.location = "/servers/create?#{$.param(State.counts)}&id=#{scope.location.id}"
       
@@ -35,8 +43,10 @@
     scope.prepareGraphs = ->
       uptime = State.currentUptime(scope.location)
       indices = scope.location?.indices
-      new helpers.CloudIndexChart($(el).find(".cloud-index-graph")[0], indices).draw() if indices
-      new helpers.UptimeChart($(el).find(".uptime-chart")[0], uptime).draw() if uptime
+      indexGraph = $(el).find(".cloud-index-graph")[0]
+      uptimeGraph = $(el).find(".uptime-chart")[0]
+      new helpers.CloudIndexChart(indexGraph, indices, popup).draw() if indices
+      new helpers.UptimeChart(uptimeGraph, uptime).draw() if uptime
       
     scope.$watch "location", ->
       scope.prepareGraphs()

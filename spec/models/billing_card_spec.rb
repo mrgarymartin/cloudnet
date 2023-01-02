@@ -1,7 +1,8 @@
 require 'rails_helper'
 
 describe BillingCard do
-  let (:card) { FactoryGirl.create(:billing_card) }
+  let(:card) { FactoryGirl.create(:billing_card) }
+  let(:user) { FactoryGirl.create(:user) }
 
   it 'should be a valid billing card' do
     expect(card).to be_valid
@@ -10,6 +11,13 @@ describe BillingCard do
   it 'should be invalid without an account' do
     card.account = nil
     expect(card).not_to be_valid
+  end
+  
+  it 'should be invalid without phone verification' do
+    user.phone_number = nil
+    new_card = FactoryGirl.build(:billing_card, account: user.account)
+    expect(user.phone_verified?).to be false
+    expect(new_card).not_to be_valid
   end
 
   describe 'Country and Country Codes' do
@@ -182,9 +190,9 @@ describe BillingCard do
     end
 
     it 'should unset a card to not primary if another primary card comes through' do
-      card1 = FactoryGirl.create(:billing_card, account: card.account, primary: true)
-      card2 = FactoryGirl.create(:billing_card, account: card.account)
-      card3 = FactoryGirl.create(:billing_card, account: card.account)
+      card1 = FactoryGirl.create(:billing_card, account: user.account, primary: true)
+      card2 = FactoryGirl.create(:billing_card, account: user.account)
+      card3 = FactoryGirl.create(:billing_card, account: user.account)
 
       expect(card1.primary).to be true
       expect(card2.primary).to be false
@@ -196,6 +204,28 @@ describe BillingCard do
       expect(card1.primary).to be false
       expect(card2.primary).to be false
       expect(card3.primary).to be true
+    end
+    
+    it 'should set a new primary card' do
+      card1 = FactoryGirl.create(:billing_card, account: user.account, primary: true)
+      card2 = FactoryGirl.create(:billing_card, account: user.account)
+      
+      expect(card1.primary).to be true
+      expect(card2.primary).to be false
+      
+      card1.set_new_primary
+      [card1, card2].each(&:reload)
+      
+      expect(card1.primary).to be false
+      expect(card2.primary).to be true
+    end
+    
+    it 'should not let delete the only card' do
+      card1 = FactoryGirl.create(:billing_card, account: user.account)
+      expect(card1.destroy).to be false
+      
+      card2 = FactoryGirl.create(:billing_card, account: user.account)
+      expect(card1.destroy).to be card1
     end
   end
 end

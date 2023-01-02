@@ -31,7 +31,6 @@
   }
 ]
 
-
 @app.controller "ServerIndividualCtrl", ["$scope", "$timeout", "Servers", "ServerEvents", ($scope, $timeout, Servers, ServerEvents) ->
   tick = (serverId) ->
     Servers.get {serverId: serverId}, (response) ->
@@ -45,7 +44,7 @@
     $timeout (() -> tick(serverId)), 10 * 1000
 
   $scope.disabled = (server) ->
-    server.state != 'on' && server.state != 'off'    
+    server.state != 'on' && server.state != 'off' && server.state != 'blocked'
 
   $scope.init = (serverId) ->
     tick(serverId)
@@ -66,3 +65,29 @@ $ ->
       button.removeAttr('disabled');
     else
       button.attr('disabled','disabled');
+  
+  $(document).on "click", "#install-notes-button", (e) ->
+    e.preventDefault()
+    serverId = $(this).attr('server-id')
+    loadInstallNotes(serverId)
+
+  loadInstallNotes = (serverId) ->    
+    $('#install-notes').on 'show.bs.modal', (e) -> 
+      $("#install-notes .modal-body").html """
+        <div class="jg-widget-form pure-g-r clearfix">
+          <div>
+            <p>
+              Please wait, getting install notes...
+            </p>
+          </div>
+        </div>
+      """
+    
+    $("#install-notes").modal("show")
+      
+    $.ajax 
+      type: "GET",
+      url: "/servers/#{serverId}/install_notes",
+      dataType: "html",
+      success: (response) ->
+        $("#install-notes .modal-body").html(response)

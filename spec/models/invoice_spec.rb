@@ -73,6 +73,7 @@ describe Invoice do
         expect(invoice.remaining_cost).to eq(invoice.total_cost - charge1.amount)
 
         charge2 = FactoryGirl.create(:charge, invoice: invoice)
+        invoice.reload
         expect(invoice.remaining_cost).to eq(invoice.total_cost - charge1.amount - charge2.amount)
       end
     end
@@ -182,7 +183,7 @@ describe Invoice do
 
   describe 'billing address' do
     before(:each) do
-      @account = FactoryGirl.create(:account)
+      @account = FactoryGirl.create(:account, :with_user)
     end
 
     it 'should allow setting and retrieving of an address' do
@@ -201,5 +202,9 @@ describe Invoice do
   it 'should have a GBP amount of the total' do
     expect(Invoice.in_gbp(1234)).to eq(1234 * Invoice::USD_GBP_RATE)
     expect(Invoice.in_gbp(0)).to eq(0 * Invoice::USD_GBP_RATE)
+  end
+  
+  it 'should create events at Sift' do
+    expect { FactoryGirl.create(:invoice) }.to change(CreateSiftEvent.jobs, :size).by(1)
   end
 end

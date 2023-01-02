@@ -10,6 +10,7 @@
 // Read Sprockets README (https://github.com/sstephenson/sprockets#sprockets-directives) for details
 // about supported directives.
 //
+//= require jquery
 //= require accounting.min
 //= require angular
 //= require async
@@ -18,7 +19,6 @@
 //= require angular-animate
 //= require editor/marked
 //= require editor/codemirror
-//= require jquery
 //= require jquery_ujs
 //= require jquery.creditCardValidator
 //= require jquery.payment
@@ -37,6 +37,7 @@
 //= require moment-range
 //= require select2.min
 //= require angular-moment.min
+//= require ui-utils.min
 //= require underscore
 //= require ractive.min
 //= require perfect-scrollbar
@@ -47,6 +48,8 @@
 //= require jquery.datatables.min
 //= require jquery.datatables.bootstrap
 //= require ./primary/main
+//= require ./helpers/time_chart.coffee
+//= require intlTelInput/intlTelInput.min
 //= require_tree ./primary
 //= require_tree ./helpers
 //= require_tree ./angular/models

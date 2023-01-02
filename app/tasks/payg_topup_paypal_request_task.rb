@@ -1,5 +1,5 @@
 class PaygTopupPaypalRequestTask < BaseTask
-  def initialize(account, usd_amount, request)
+  def initialize(account, usd_amount, request, ip = nil)
     Paypal.sandbox! unless Rails.env.production?
 
     @usd_amount = usd_amount
@@ -8,15 +8,21 @@ class PaygTopupPaypalRequestTask < BaseTask
     @account = account
     @user    = account.user
     @request = request
+    @remote_ip  = ip
   end
 
-  def process
-    unless Payg::VALID_TOP_UP_AMOUNTS.include?(@usd_amount)
-      errors << 'Amount submitted is invalid. Please try again'
-      return false
-    end
-
+  def process    
     begin
+      unless @account.fraud_safe?(@remote_ip)
+        errors << 'Restricted account. Please contact support.'
+        return false
+      end
+      
+      unless @account.valid_top_up_amounts.include?(@usd_amount.to_i)
+        errors << 'Invalid top up amount'
+        return false
+      end
+      
       request = Paypal::Express::Request.new(
         username: PAYMENTS[:paypal][:api_user],
         password: PAYMENTS[:paypal][:api_pass],
@@ -27,7 +33,7 @@ class PaygTopupPaypalRequestTask < BaseTask
         currency_code: :USD,
         amount: @usd_amount,
         items: [{
-          name: 'Cloud.net PAYG',
+          name: "#{ENV['BRAND_NAME']} Wallet",
           description: "Cloud Top Up for #{@user.full_name}",
           amount: @usd_amount,
           category: :Digital

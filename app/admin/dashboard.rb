@@ -20,10 +20,24 @@ ActiveAdmin.register_page 'Dashboard' do
     columns do
       column do
         panel 'Statistics' do
+          def resources
+            @resources ||= Server.purchased_resources
+          end
+          
           table do
             tr do
-              td 'Total Servers Running/Present'
+              td 'Total Servers'
               td Server.count
+            end
+            
+            tr do
+              td 'Total Servers Running'
+              td Server.where(state: 'on').count
+            end
+
+            tr do
+              td 'Users with Servers Running'
+              td Server.where(state: 'on').pluck('DISTINCT user_id').count
             end
 
             tr do
@@ -74,6 +88,26 @@ ActiveAdmin.register_page 'Dashboard' do
               td Ticket.created_this_month.count
             end
 
+            tr do
+              td 'Cores'
+              td resources[:cpu]
+            end
+            
+            tr do
+              td 'Memory [MB]'
+              td  number_with_delimiter(resources[:mem])
+            end
+            
+            tr do
+              td 'Disc Space [GB]'
+              td  number_with_delimiter(resources[:disc])
+            end
+            
+            tr do 
+              forecast = (Server.sum(:forecasted_rev) / Invoice::MILLICENTS_IN_DOLLAR).round(2)
+              td 'Forecasted Month Revenue [USD]'
+              td forecast
+            end
           end
         end
       end
@@ -81,9 +115,9 @@ ActiveAdmin.register_page 'Dashboard' do
       column do
         panel 'Servers By Location/Provider' do
           table do
-            Location.all.map do |location|
+            Location.all.order('provider ASC').map do |location|
               tr do
-                td link_to location.to_s, admin_location_path(location)
+                td link_to location.provider_label, admin_location_path(location)
                 td location.servers.count
               end
             end

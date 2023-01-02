@@ -31,7 +31,7 @@ module ApplicationHelper
       render partial: 'shared/menu/public_header'
     end
   end
-  
+
   def gravatar_image(user, size = 32)
     hash = Digest::MD5.hexdigest(user.email.downcase.strip)
     "https://secure.gravatar.com/avatar/#{hash}?s=#{size}&d=retro"
@@ -41,14 +41,29 @@ module ApplicationHelper
     Invoice.pretty_total(total, unit, precision)
   end
 
+  # Pending invoice amount (-) wallet balance
   def remaining_balance(user)
-    balance = user.account.remaining_balance
-    balance < 0 ? "(#{pretty_total(balance)})" : "#{pretty_total(balance)}"
+    balance = pretty_total user.account.remaining_balance
+    # remaining_balance() is confusing, in the codebase negative values mean credit, but for users
+    # we represent negative balances as being in debt.
+    balance.gsub!('-', '')
+    remaining_balance_in_credit?(user) ? "#{balance}" : "-#{balance}"
+  end
+  
+  def current_user_remaining_balance
+    Rails.cache.fetch(['remaining_balance', current_user.id], expires_in: 1.hour) do
+      remaining_balance(current_user)
+    end
   end
 
-  def payg_balance(user)
-    balance = user.account.payment_receipts.to_a.sum(&:remaining_cost)
-    balance < 0 ? "(#{pretty_total(balance)})" : "#{pretty_total(balance)}"
+  def remaining_balance_in_credit?(user)
+    user.account.remaining_balance <= 0
+  end
+  
+  def topup_balance(balance)
+    current_balance = pretty_total balance
+    current_balance.gsub!('-', '')
+    balance <= 0 ? "#{current_balance}" : "-#{current_balance}"
   end
 
   def tag_string(tag)
@@ -99,4 +114,27 @@ module ApplicationHelper
   def body_class
     controller_name + ' ' + controller_name + '-' + action_name
   end
+  
+  def provisioner_role_options(selected)
+    options_for_select(Server.provisioner_roles.map {|role| [role.humanize, role]}, selected)
+  end
+  
+  # sliders when
+  # no vps AND no package choosen AND values in url params
+  def activate_slider_tab
+    @wizard_object.location && (!@wizard_object.location.budget_vps and !@wizard_object.package_matched and @wizard_object.params_values?)
+  end
+  
+  def boolean_to_words(value)
+    value ? "Yes" : "No"
+  end
+  
+  def boolean_to_results(value)
+    value ? "Pass" : "Fail"
+  end
+  
+  def just_logged_out?
+    params[:logout] == "1"
+  end
+  
 end

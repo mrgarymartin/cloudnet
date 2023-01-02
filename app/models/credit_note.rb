@@ -6,17 +6,24 @@
 class CreditNote < ActiveRecord::Base
   include InvoiceCreditShared
   include CreditPaymentsShared
+  include SiftProperties
 
   acts_as_paranoid
   acts_as_sequenced start_at: 1
 
   belongs_to :account
   has_many :credit_note_items, dependent: :destroy
+  belongs_to :coupon
+  
   validates :account, presence: true
 
   enum_field :state, allowed_values: [:uncredited, :credited], default: :credited
 
   validate :remaining_cost_can_not_be_negative
+  
+  after_create :create_sift_event
+  
+  TRIAL_CREDIT = 10
 
   # `invoiceables` are generally servers
   def self.generate_credit_note(invoiceables, account, last_invoice = nil)
@@ -57,6 +64,12 @@ class CreditNote < ActiveRecord::Base
   def number
     credit_number
   end
+  
+  def create_sift_event
+    CreateSiftEvent.perform_async("$transaction", sift_credit_note_properties)
+  rescue StandardError => e
+    ErrorLogging.new.track_exception(e, extra: { user: account.user.id, source: 'CreditNote#create_sift_event' })
+  end
 
   private
 
@@ -64,9 +77,13 @@ class CreditNote < ActiveRecord::Base
     errors.add(:remaining_cost, 'Can not be negative') if remaining_cost < 0
   end
 
-  def cost_from_items(type)
+  def cost_from_items(type, scopes = nil)
     if items?
-      credit_note_items.inject(0) { |total, item| total + item.send(type) }
+      if scopes
+        credit_note_items.send(scopes).inject(0) { |total, item| total + item.send(type) }
+      else
+        credit_note_items.inject(0) { |total, item| total + item.send(type) }
+      end
     else
       0
     end
@@ -74,8 +91,15 @@ class CreditNote < ActiveRecord::Base
 
   # Was this credit note manually issued throught the admin interface?
   def manually_added?
-    if credit_note_items.count == 1
+    if credit_note_items.size == 1
       return true if credit_note_items.first.source_type == 'User'
+    end
+    false
+  end
+  
+  def trial_credit?
+    if credit_note_items.size == 1
+      return true if credit_note_items.first.description == 'Trial Credit'
     end
     false
   end
@@ -92,5 +116,30 @@ class CreditNote < ActiveRecord::Base
     )
     credit_note.credit_note_items = [credit_item]
     credit_note.save!
+    account.create_activity(:create_manual_credit, owner: account.user, params: { credit_note: credit_note.id, amount: credit_note.total_cost, issued_by: user_that_issued_note.id })
+    
+    # Charge unpaid invoices
+    unpaid_invoices = account.invoices.not_paid
+    ChargeInvoicesTask.new(account.user, unpaid_invoices).process unless unpaid_invoices.empty?
+  end
+  
+  def self.trial_issue(account, card)
+    # Auth $1 on the card to verify card before issuing trial credit
+    amount = Invoice.milli_to_cents(100_000)
+    charge = Payments.new.auth_charge(account.gateway_id, card.processor_token, amount)
+    return unless charge[:charge_id]
+    
+    account.create_activity :auth_charge, owner: account.user, params: { card: card.id, amount: amount, charge_id: charge[:charge_id] }
+    
+    credit_note = CreditNote.new account: account
+    credit_item = CreditNoteItem.new(
+      net_cost: TRIAL_CREDIT * Invoice::MILLICENTS_IN_DOLLAR,
+      tax_cost: 0,
+      description: 'Trial Credit'
+    )
+    credit_note.credit_note_items = [credit_item]
+    credit_note.save!
+    account.create_activity(:create_trial_credit, owner: account.user, params: { credit_note: credit_note.id, amount: credit_note.total_cost })
+    Analytics.track(account.user, event: 'Issued trial credit', properties: { credit_note: credit_note.id, amount: Invoice.pretty_total(credit_note.total_cost) })
   end
 end

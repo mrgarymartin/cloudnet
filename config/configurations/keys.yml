@@ -1,6 +1,5 @@
 defaults: &defaults
   maxmind:
-    user_id: <%= ENV["MAXMIND_USER"] %>
     license_key: <%= ENV["MAXMIND_KEY"] %>
   five_hundred_px:
     api_key: <%= ENV["FIVEHUNDREDPX_KEY"] %>
@@ -9,6 +8,27 @@ defaults: &defaults
     public_token: <%= ENV["MAPBOX_PUBLIC_TOKEN"] %>
   analytics:
     token: <%= ENV["ANALYTICS_KEY"] %>
+  pingdom:
+    api_key: <%= ENV["PINGDOM_KEY"] %>
+    user: <%= ENV["PINGDOM_USER"] %>
+    pass: <%= ENV["PINGDOM_PASS"] %>
+  sift_science:
+    js_key: <%= ENV["SIFT_SCIENCE_JS_SNIPPET_KEY"] %>
+    api_key: <%= ENV["SIFT_SCIENCE_API_KEY"] %>
+    validate_action_id: <%= ENV["SIFT_USER_VALIDATE_ACTION_ID"] %>
+    approve_action_id: <%= ENV["SIFT_USER_APPROVE_ACTION_ID"] %>
+    account_id: <%= ENV["SIFT_SCIENCE_ACCOUNT_ID"] %>
+  nexmo:
+    api_key: <%= ENV["NEXMO_API_KEY"] %>
+    secret: <%= ENV["NEXMO_API_SECRET"] %>
+  adroll:
+    adv_id: <%= ENV["ADROLL_ADV_ID"] %>
+    pix_id: <%= ENV["ADROLL_PIX_ID"] %>
+  elevio:
+    account_id: <%= ENV["ELEVIO_ACCOUNT_ID"] %>
+  intercom:
+    app_id: <%= ENV["INTERCOM_APP_ID"] %>
+    secret_key: <%= ENV["INTERCOM_SECRET_KEY"] %>
 
 development:
   <<: *defaults

@@ -1,0 +1,13 @@
+%h3 Regions
+%p<
+  Only show clouds from region...
+
+.regions-container
+  .region
+    %label
+      %input{type: "radio", :"ng-model" => "state.regionId", checked: "", name: "region", :"ng-value" => "-1"}
+      Global
+  .region{:"ng-repeat" => "l in state.locations | filter:{region: '!'} | unique:'region.id'"}
+    %label
+      %input{type: "radio", :"ng-model" => "state.regionId", name: "region", :"ng-value" => "{{l.region.id}}"}
+      {{l.region.name}}

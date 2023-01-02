@@ -39,6 +39,14 @@ module InvoiceCreditShared
   def total_cost
     cost_from_items(:total_cost) * (1 - coupon_percentage)
   end
+  
+  def trial_credits_total_cost
+    cost_from_items(:total_cost, :trial_credits) * (1 - coupon_percentage)
+  end
+  
+  def manual_credits_total_cost
+    cost_from_items(:total_cost, :manual_credits) * (1 - coupon_percentage)
+  end
 
   def pre_coupon_total_cost_cents
     Invoice.milli_to_cents(pre_coupon_total_cost)
@@ -68,12 +76,12 @@ module InvoiceCreditShared
 
   # Get the coupon associated with the current account
   def coupon
-    if self.class == CreditNote && manually_added?
+    if self.class == CreditNote && (manually_added? || trial_credit?)
       # Coupon does not apply to manually issued credit notes. Basically this removes it from the
       # credit note PDF.
       nil
     else
-      Coupon.find_by_id(coupon_id)
+      super
     end
   end
 
@@ -91,6 +99,7 @@ module InvoiceCreditShared
     end
 
     def hours_till_next_invoice(account)
+      return 0 unless account
       [account.hours_till_next_invoice, Account::HOURS_MAX].min
     end
 

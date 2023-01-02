@@ -44,6 +44,7 @@ describe ServersController do
         allow(ServerTasks).to receive(:new).and_return(@server_tasks)
         allow(MonitorServer).to receive(:perform_in).and_return(true)
         request.env['HTTP_REFERER'] = servers_path
+        Sidekiq::Worker.clear_all
       end
 
       it 'should allow rebooting of a server' do
@@ -51,6 +52,7 @@ describe ServersController do
         expect(@server_tasks).to have_received(:perform)
         expect(MonitorServer).to have_received(:perform_in)
         expect(response).to redirect_to(servers_path)
+        assert_equal 1, CreateSiftEvent.jobs.size
       end
 
       it 'should show an error if reboot schedule failed' do
@@ -65,6 +67,7 @@ describe ServersController do
         expect(@server_tasks).to have_received(:perform)
         expect(MonitorServer).to have_received(:perform_in)
         expect(response).to redirect_to(servers_path)
+        assert_equal 1, CreateSiftEvent.jobs.size
       end
 
       it 'should show an error if shutdown schedule failed' do
@@ -80,6 +83,7 @@ describe ServersController do
         expect(@server_tasks).to have_received(:perform)
         expect(MonitorServer).to have_received(:perform_in)
         expect(response).to redirect_to(servers_path)
+        assert_equal 1, CreateSiftEvent.jobs.size
       end
 
       it 'should show an error if startup schedule failed' do
@@ -89,17 +93,41 @@ describe ServersController do
         expect(response).to redirect_to(servers_path)
         expect(flash[:warning]).to eq('Could not schedule starting up of server. Please try again later')
       end
+      
+      it 'should rebuild network of a server' do
+        server.update(state: :on)
+        rebuild_network = double('RebuildNetwork', process: true)
+        allow(RebuildNetwork).to receive(:new).and_return(rebuild_network)
+        
+        post :rebuild_network, id: server.id
+        expect(rebuild_network).to have_received(:process)
+        expect(flash[:notice]).to eq('Network rebuild has been scheduled')
+      end
+      
+      it 'should reset password of a server' do
+        server.update(state: :on)
+        reset_password = double('ResetRootPassword', process: true)
+        allow(ResetRootPassword).to receive(:new).and_return(reset_password)
+        
+        post :reset_root_password, id: server.id
+        expect(reset_password).to have_received(:process)
+        expect(flash[:notice]).to eq('Password has been reset')
+      end
 
       describe 'editing server' do
         context 'before editing' do
           it 'should preset the server wizard to step 2' do
-            expect_any_instance_of(ServersController).to receive(:step2)
+            expect_any_instance_of(ServersController).to receive(:step2).and_call_original
+            allow(Analytics).to receive(:track)
             get :edit, id: server.id
           end
         end
 
         context 'submitting an edit' do
           before :each do
+            @edit_server_task = double('EditServerTask', edit_server: true)
+            allow(EditServerTask).to receive_messages(new: @edit_server_task)
+            
             @card = FactoryGirl.create :billing_card, account: @current_user.account
             @payments = double('Payments', auth_charge: { charge_id: 12_345 }, capture_charge: { charge_id: 12_345 })
             @server = FactoryGirl.create(
@@ -107,21 +135,32 @@ describe ServersController do
               user: @current_user,
               cpus: 1,
               memory: 1024,
-              disk_size: 10
+              disk_size: 20
             )
+            
+            @old_server_params = {"cpus"=>@server.cpus, 
+                                  "memory"=>@server.memory,
+                                  "name"=>@server.name}
             # We don't actually destroy the old server to make the edit, we just need 2 server
             # entities so that we can generate an invoice for both in order to figure out the price
             # difference
             @new_server = FactoryGirl.create(
               :server,
               user: @current_user,
-              cpus: 4,
-              memory: 4096,
-              disk_size: 10
+              cpus: 3,
+              memory: 1512,
+              disk_size: 20
             )
-
+            
+            @payment_receipts = FactoryGirl.create_list(:payment_receipt, 2, account: @current_user.account)
+                                 
             allow(Payments).to receive_messages(new: @payments)
             allow(MonitorServer).to receive(:perform_async).and_return(true)
+            Sidekiq::Testing.inline!
+          end
+          
+          after(:each) do
+            Sidekiq::Testing.fake!
           end
 
           it 'should trigger the edit server task' do
@@ -137,19 +176,15 @@ describe ServersController do
             RSpec::Matchers.define :pretty_total do |expected|
               match { |actual| Invoice.pretty_total(expected) == Invoice.pretty_total(actual) }
             end
-            expect(@payments).to receive(:auth_charge)
-              .with(@current_user.account.gateway_id, @card.processor_token, pretty_total(cost_difference_cents))
-              .and_return(charge_id: 12_345)
+            expect(@payments).to_not receive(:auth_charge)
 
-            expect(@server_tasks).to receive(:perform).with(:edit, @current_user.id, @server.id)
-            session['warden.user.user.session'] = {
-              server_wizard_params: {
-                cpus: @new_server.cpus,
-                memory: @new_server.memory,
-                disk_size: @new_server.disk_size
-              }
+            expect(@edit_server_task).to receive(:edit_server)
+            session[:server_wizard_params] = {
+              cpus: @server.cpus,
+              memory: @server.memory,
+              disk_size: @server.disk_size
             }
-            params = { id: @server.id, server_wizard: { payment_type: 'prepaid' } }
+            params = { id: @server.id, server_wizard: { current_step: 2, name: @new_server.name, hostname: @new_server.hostname, template_id: @server.template_id, memory: @new_server.memory, cpus: @new_server.cpus, disk_size: @new_server.disk_size }}
             post :edit, params
             @server.reload
             expect(@server.cpus).to eq @new_server.cpus
@@ -162,16 +197,14 @@ describe ServersController do
 
           it 'should handle errors if updating resources fails' do
             expect_any_instance_of(SentryLogging).to receive(:raise).with(instance_of(Faraday::Error::ClientError))
-            allow(@server_tasks).to receive(:perform).and_raise(Faraday::Error::ClientError.new('Test'))
+            allow(@edit_server_task).to receive(:edit_server).and_raise(Faraday::Error::ClientError.new('Test'))
             expect(@payments).to_not receive(:capture_charge)
-            session['warden.user.user.session'] = {
-              server_wizard_params: {
-                cpus: 3,
-                memory: 2096,
-                disk_size: 10
-              }
+            session[:server_wizard_params] = {
+              cpus: 3,
+              memory: 2096,
+              disk_size: 10
             }
-            params = { id: @server.id, server_wizard: { payment_type: 'prepaid' } }
+            params = { id: @server.id, server_wizard: { current_step: 2, name: @new_server.name, hostname: @new_server.hostname, template_id: @server.template_id, memory: @new_server.memory, cpus: @new_server.cpus, disk_size: @new_server.disk_size }, template: @server.template_id }
             post :edit, params
             expect(response).to redirect_to(servers_path)
             expect(flash[:warning]).to eq('Could not schedule update of server. Please try again later')

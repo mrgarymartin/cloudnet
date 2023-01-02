@@ -1,42 +1,60 @@
 .jg-widget-content
   .jg-widget-header.pure-g.clearfix
-    %h2.pure-u-1-2.jg-icon.icon-tickets PAYG Details
+    %h2.pure-u-1-2.jg-icon.icon-tickets Wallet Details
+    - if has_stripe? && !defined?(wizard)
+      %ul.pure-u-1-2.jg-widget-controls.auto-topup-setting
+        %li.auto-topup Auto Top-up:
+        %li#auto-topup-btn
+          = form_tag toggle_auto_topup_billing_index_path do
+            = check_box_tag :auto_topup, '1', current_user.account.auto_topup, {class: 'tgl tgl-light'}
+            %label.tgl-btn{for: "auto_topup"}
   .jg-widget-body.pure-u-1
     .jg-widget-form.pure-g-r.clearfix
       .form-group.jg-inline.pure-g-r.clearfix.pure-g.pure-u-1
-        .pure-u-1-3.billing-pie
+        .pure-u-1-3
           .jg-widget-body
-            .jg-chart.piechart.payg-chart
-              %svg
-          %p
-            PAYG Balance:
-            %strong= Invoice.pretty_total(payg[:balance])
-          %p.pie-balance-used
-            Balance Used:
-            %strong= Invoice.pretty_total(payg[:used])
-          %p.pie-balance-available
-            Available Balance:
-            %strong= Invoice.pretty_total(payg[:available])
+          .jg-wallet-details= yield :wallet_balance_info
+          - unless defined?(wizard)
+            %p.auto-topup-info
+              - if has_stripe?
+                ="If you have Auto Top-up enabled, we will automatically top-up your account with $#{Payg::MIN_AUTO_TOP_UP_AMOUNT} when your Wallet balance goes below $2, provided you have active servers and atleast one billing card added to your account."
+              - else
+                Wallet balance will be used against any invoices that are generated subsequently. You may top-up your Wallet using PayPal by clicking on the "Add Funds" button below. 
 
           - if defined?(wizard)
             %p
-              - days = current_user.account.payg_server_days(wizard)
-              - if days < 1
-                = "You do not have enough credit to run this server for more than 24 hours. Please top up your PAYG account"
-              - elsif days > 28
-                = "You have enough credit to run this server for more than"
-                %strong= "28 days"
-              - else
+              - if wizard.enough_wallet_credit?
+                - days = current_user.account.wallet_server_days(wizard)
                 = "You have enough available balance to run this server for approximately"
                 %strong= "#{days.round(1)} days"
+              - else
+                = "You do not have enough credit to run this server until next invoice date. Please add funds to your Wallet."
               .small
-                (this does not include any other PAYG servers which may be running, any coupon code discounts which may be applied to your account or any VAT you may need to pay)
+                (this does not include any coupon code discounts which may be applied to your account or any VAT you may need to pay)
         .pure-u-1-3
           = image_tag("/assets/paypalcards.png")
+          
+    - unless defined?(wizard)
+      .jg-widget-form.pure-g.jg-disabled
+        .jg-widget.pure-u-1
+          .jg-widget-header.pure-g.jg-external-header.jg-relative.jg-toggle.clearfix
+            %h2.icon-wallet.jg-icon.pure-u Coupon Code
+            .jg-disclosure.icon-arrow-down
+          .pure-u-md-4-24
+          .jg-widget-content.pure-u-1.pure-u-md-16-24#jg-auto-topup.jg-toggleable
+            = render partial: 'billing/coupon_code/coupon_code_form'
+    
+    - if has_stripe? && !defined?(wizard)
+      .jg-widget-form.pure-g.jg-disabled
+        .jg-widget.pure-u-1
+          .jg-widget-header.pure-g.jg-external-header.jg-relative.jg-toggle.clearfix
+            %h2.icon-wallet.jg-icon.pure-u Auto Top-up Logs
+            .jg-disclosure.icon-arrow-down
+          .pure-u-md-4-24
+          .jg-widget-content.pure-u-1.pure-u-md-16-24#jg-auto-topup.jg-toggleable
+            = render partial: 'billing/auto_topup'
+
   .jg-widget-footer.actions.clearfix
     %ul.jg-widget-controls
       %li
-        %a.btn.jg-submit-button{"data-target" => "#payg-add-funds", "data-toggle" => "modal", "rel" => "nofollow"} Add Funds
-
-:javascript
-  var payg_stats = [{"name": "Available", "y": #{payg[:available]}}, {"name": "Used", "y": #{payg[:used]}}]
+        %a.btn.jg-submit-button#add-funds-button Add Funds

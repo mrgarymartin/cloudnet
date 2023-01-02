@@ -1,13 +1,15 @@
 require 'segment/analytics'
 
 class Analytics
-  def self.track(user, events = {})
-    user_traits = {
+  def self.track(user, events = {}, anonymous_id = nil, req = nil)
+    return true if KEYS[:analytics][:token].nil?
+    user_traits = user ? {
       user_id: user.id,
-      username: user.email,
       context: { traits: { email: user.email, name: user.full_name } }
-    }
-
+      } : {anonymous_id: anonymous_id ? anonymous_id : 'guest',
+           context: {ip: req.try(:remote_ip), userAgent: req.try(:user_agent) }
+          }
+      
     service.track(events.merge(user_traits))
   end
 

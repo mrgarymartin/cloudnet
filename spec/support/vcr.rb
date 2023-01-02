@@ -2,6 +2,7 @@ require 'vcr'
 
 # Use the .env file to compile the list of sensitive data that should not be recorded in
 # cassettes
+NOT_REPLACE = %w(ONAPP_ROLE ONAPP_BILLING_PLAN_ID SIFT_USER_VALIDATE_ACTION_ID SIFT_USER_APPROVE_ACTION_ID ONAPP_API_ALLOW_INSECURE COVERAGE SMTP_SSL_VERIFY)
 def sensitive_strings
   dotenv_path = "#{Rails.root}/.env"
   # It's not a big deal if there isn't a .env file when playing back cassettes, it's only when
@@ -13,8 +14,8 @@ def sensitive_strings
   end
   contents = File.read dotenv_path
   words = contents.split(/\s+/)
-  # Only interested in words with an '=' in them
-  words.reject! { |w| !w.include? '=' }
+  # Only interested in words with an '=' in them and not in NOT_REPLACE
+  words.reject! { |w| !w.include?('=') || NOT_REPLACE.any? {|n| w.include? n}}
   # Create a list of key/value pairs
   words.map! { |w| w.split('=', 2) }
   # Turn the key/value pairs into an actual hash
@@ -43,6 +44,7 @@ VCR.configure do |c|
   c.hook_into :webmock
   c.cassette_library_dir = 'spec/cassettes'
   c.configure_rspec_metadata!
+  c.allow_http_connections_when_no_cassette = true
 
   # Filter out sensitive data and replace with ERB interpolation.
   # Assuming that you're using .env to store your sensitive app credentials, then you can

@@ -47,7 +47,7 @@
       }
     }
     tbody {
-      height: 110px;
+      height: 115px;
       position: relative;
       overflow: hidden;
       tr {
@@ -178,4 +178,15 @@ ul.resources-footer {
     }
 
   }
+}
+#rebuild_server {
+    display: block;
+    position: relative;
+    top: -50px;
+    visibility: hidden;
+}
+
+#new-ssh-key {
+  height: 40px;
+  margin: -3px 0px 0px 0px;
 }

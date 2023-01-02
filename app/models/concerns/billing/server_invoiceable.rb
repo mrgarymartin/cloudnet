@@ -4,17 +4,23 @@ module Billing
   module ServerInvoiceable
     extend ActiveSupport::Concern
 
-    def generate_invoice_item(hours)
+    def generate_invoice_item(hours, reason = false)
       ram  = ram_invoice_item(hours)
       cpu  = cpu_invoice_item(hours)
       disk = disk_invoice_item(hours)
       ip   = ip_invoice_item(hours)
-      bw   = bandwidth_invoice_item
       template = template_invoice_item(hours)
+      bwf   = bandwidth_free_invoice_item(hours)
+      bwp   = bandwidth_paid_invoice_item(reason) if reason
+      adds = addons_invoice_items(hours)
 
-      net_cost = ram[:net_cost] + cpu[:net_cost] + disk[:net_cost] + bw[:net_cost] + ip[:net_cost] + template[:net_cost]
+      net_cost = ram[:net_cost] + cpu[:net_cost] + disk[:net_cost] + ip[:net_cost] + template[:net_cost] + adds.map { |a| a[:net_cost] }.sum
+      net_cost += reason ? bwp[:net_cost] : 0
+
       description = "Server: #{name} (Hostname: #{hostname})"
-      { description: description, net_cost: net_cost, metadata: [ram, cpu, disk, bw, ip, template], source: self }
+      metadata = reason ? [ram, cpu, disk, bwf, bwp, ip, template] : [ram, cpu, disk, bwf, ip, template]
+      adds.map {|addon| metadata << addon }
+      { description: description, net_cost: net_cost, metadata: metadata, source: self }
     end
 
     def generate_payg_invoice_item(transactions)
@@ -38,8 +44,9 @@ module Billing
       disk = disk_invoice_item(1)
       ip = ip_invoice_item(1)
       template = template_invoice_item(1)
+      adds = addons_invoice_items(1)
 
-      hourly = ram[:net_cost] + cpu[:net_cost] + disk[:net_cost] + ip[:net_cost] + template[:net_cost]
+      hourly = ram[:net_cost] + cpu[:net_cost] + disk[:net_cost] + ip[:net_cost] + template[:net_cost] + adds.map { |a| a[:net_cost] }.sum
     end
 
     def monthly_cost
@@ -84,23 +91,69 @@ module Billing
       }
     end
 
-    def bandwidth_invoice_item
+    # Free monthly bandwidth is splited per usage hour
+    def bandwidth_free_invoice_item(hours = Account::HOURS_MAX)
+      bnd_prepaid = (bandwidth.to_f * 1024 * hours / Account::HOURS_MAX).round #MB
       {
         name: 'Prepaid Bandwidth',
         unit_cost: location.price_bw,
-        units: bandwidth,
-        description: "#{bandwidth} GB for the month",
+        units: bnd_prepaid,
+        hours: hours,
+        description: "#{bnd_prepaid}MB for next #{hours} hours",
         net_cost: 0.0
       }
     end
 
+    # Additional bandwidth is post-paid
+    # TODO: bandwidth price is taken from location, which can be changed after server creation
+    def bandwidth_paid_invoice_item(reason)
+      bandwidth_usage = BillingBandwidth.new(self, reason).bandwidth_usage
+      {
+        name: 'Additional Bandwidth',
+        unit_cost: location.price_bw,
+        units: bandwidth_usage[:billable],
+        hours: bandwidth_usage[:hours],
+        description: billable_bandwidth_description(bandwidth_usage),
+        net_cost: location.price_bw * bandwidth_usage[:billable] # price in milicents / MB
+      }
+    end
+    
+    def addons_invoice_items(hours)
+      invoice_items = []
+      unless addons.nil?
+        addons.each do |addon|
+          invoice_items << addons_invoice_item(addon, hours)
+        end
+      end
+      return invoice_items
+    end
+    
+    def addons_invoice_item(addon, hours)
+      {
+        name: 'Add-on',
+        unit_cost: addon.price,
+        units: 1,
+        hours: hours,
+        description: "#{addon.name} for #{hours} hours",
+        net_cost: addon.price * hours
+      }
+    end
+
+    def billable_bandwidth_description(bandwidth_usage)
+      billable_MB = bandwidth_usage[:billable]
+      free_MB = bandwidth_usage[:free]
+      hours_used = bandwidth_usage[:hours]
+      "#{billable_MB}MB over free #{free_MB}MB for past #{hours_used} hours"
+    end
+
     def ip_invoice_item(hours)
+      additional_ips = [ip_addresses.to_i, 1].max - 1
       {
         name: 'IP Address',
         unit_cost: location.price_ip_address,
-        units: ip_addresses,
-        description: "#{ip_addresses} IP(s) for #{hours} hours",
-        net_cost: 0.0
+        units: additional_ips,
+        description: "#{additional_ips} additional IP(s) for #{hours} hours",
+        net_cost: location.price_ip_address.to_f * additional_ips * hours
       }
     end
 
@@ -114,29 +167,25 @@ module Billing
       }
     end
 
-    # Used by prepaid servers. When creating or editing a server, the first step is to calculate
-    # the amount needed to be charged on card. If the user has any credit notes then they can be
-    # used to reduce the charge.
-    def auth_charge
-      @charge = nil
-      @billing_success = false
-
+    def charge_wallet
       @remaining_cost = calculate_amount_to_charge
-      return unless Invoice.milli_to_cents(@remaining_cost) >= Invoice::MIN_CHARGE_AMOUNT
-
-      @charge = prepare_charge_on_payment_gateway
-    rescue Stripe::StripeError => e
-      ErrorLogging.new.track_exception(e, extra: { current_user: user, source: 'CreateServerTask' })
+      if @remaining_cost > 0
+        payment_receipts_available = user.account.payment_receipts.with_remaining_cost
+        raise "Insufficient funds" if @remaining_cost > payment_receipts_available.to_a.sum(&:remaining_cost)
+        @payment_receipts_used = PaymentReceipt.charge_account(payment_receipts_available, @remaining_cost)
+        user.account.create_activity :charge_payment_account, owner: user, params: { notes: @payment_receipts_used } unless @payment_receipts_used.empty?
+      end
+    rescue StandardError => e
+      ErrorLogging.new.track_exception(e, extra: { current_user: user, source: 'ChargeWallet' })
+      @build_errors.push('Could not charge your Wallet for the invoice amount. Please try again')
       user.account.create_activity(
-        :auth_charge_failed,
+        :charge_wallet_failed,
         owner: user,
         params: {
-          card: card.id,
-          amount: Invoice.milli_to_cents(@remaining_cost),
-          reason: e.message
+          invoice: @invoice.id,
+          amount: @remaining_cost
         }
       )
-      @build_errors.push("Could not authorize charge using the card you've selected, please try again")
       raise ServerWizard::WizardError
     end
 
@@ -146,8 +195,8 @@ module Billing
       # First calculate how much this server is going to cost for the rest of the month
       @invoice = Invoice.generate_prepaid_invoice([self], user.account)
 
-      # Then we need to know if the user has any spare credit notes that will reduced the amount of the
-      # billing card charge we're about to make.
+      # Then we need to know if the user has any spare credit notes that will be reduced from the amount of the
+      # Wallet charge we're about to make.
       credit_notes = user.account.credit_notes.with_remaining_cost
       # Deduct any unused value from the user's credit notes
       @notes_used = CreditNote.charge_account(credit_notes, @invoice.total_cost)
@@ -163,74 +212,9 @@ module Billing
       calculate_remaining_cost(@invoice.total_cost, @notes_used)
     end
 
-    def prepare_charge_on_payment_gateway
-      charge = Payments.new.auth_charge(
-        user.account.gateway_id,
-        card.processor_token,
-        Invoice.milli_to_cents(@remaining_cost)
-      )
-      user.account.create_activity(
-        :auth_charge,
-        owner: user,
-        params: {
-          card: card.id,
-          amount: Invoice.milli_to_cents(@remaining_cost),
-          charge_id: charge[:charge_id]
-        }
-      )
-      charge
-    end
-
-    # Actually make the charge against a card.
-    def make_charge
-      if @charge.present?
-        Payments.new.capture_charge(@charge[:charge_id], "Cloud.net Invoice #{@invoice.invoice_number}")
-        user.account.create_activity(
-          :capture_charge,
-          owner: user,
-          params: {
-            card: card.id,
-            charge: @charge[:charge_id]
-          }
-        )
-      end
-
-      charging_paperwork
-    rescue StandardError => e
-      # Clean up the lingering invoice and server
-      @invoice.save
-      @invoice.really_destroy!
-
-      if @newly_built_server
-        @newly_built_server.destroy
-      else
-        # Undo the server resize
-        edit(
-          server_wizard: {
-            name: @old_server_specs.name,
-            cpus: @old_server_specs.cpus,
-            memory: @old_server_specs.memory,
-            disk_size: @old_server_specs.disk_size
-          }
-        )
-        request_server_edit
-      end
-
-      ErrorLogging.new.track_exception(e, extra: { current_user: user, source: 'CreateServerTask' })
-      @build_errors.push('Could not charge your card for the invoice amount. Please try again')
-      user.account.create_activity(
-        :capture_charge_failed,
-        owner: user,
-        params: {
-          card: card.id,
-          charge: @charge[:charge_id]
-        }
-      )
-      raise ServerWizard::WizardError
-    end
-
     def charging_paperwork
-      @invoice.invoice_items.first.source = self
+      @invoice.invoice_items.first.source = @newly_built_server || @old_server_specs || self
+      @invoice.increase_free_billing_bandwidth(@old_server_specs.try(:bandwidth))
       @invoice.save
       remaining = Invoice.milli_to_cents(@remaining_cost)
       if remaining > 0 && remaining < Invoice::MIN_CHARGE_AMOUNT
@@ -240,8 +224,13 @@ module Billing
       end
 
       # Make a note of charges made for financial reports
-      create_credit_note_charges
-      create_card_charges if @charge.present?
+      create_credit_note_charges if @notes_used.present?
+      create_payment_receipt_charges if @payment_receipts_used.present?
+      user.account.expire_wallet_balance
+    end
+
+    def create_payment_receipt_charges
+      ChargeInvoicesTask.new(user, [@invoice], true).create_payment_receipt_charges(user.account, @invoice, @payment_receipts_used)
     end
 
     def create_credit_note_charges
@@ -260,38 +249,18 @@ module Billing
       end
     end
 
-    def create_card_charges
-      Charge.create(
-        source: card,
-        invoice: @invoice,
-        amount: @remaining_cost,
-        reference: @charge[:charge_id]
-      )
-      user.account.create_activity(
-        :card_charge,
-        owner: user,
-        params: {
-          invoice: @invoice.id,
-          amount: @remaining_cost,
-          card: card.id
-        }
-      )
-    end
-
     def calculate_remaining_cost(total_cost, notes_used)
       total_cost - notes_used.values.sum
     end
 
     def create_credit_note_for_time_remaining
-      item = InvoiceItem.where(source_type: self.class.to_s, source_id: id).order(updated_at: :desc).last
-
-      if item.present?
-        credit_note = CreditNote.generate_credit_note([self], user.account, item.invoice)
+      if last_generated_invoice_item.present?
+        credit_note = CreditNote.generate_credit_note([self], user.account, last_generated_invoice_item.invoice)
       else
         credit_note = CreditNote.generate_credit_note([self], user.account)
       end
 
-      determine_vat_coupon_status(credit_note, item)
+      determine_vat_coupon_status(credit_note, last_generated_invoice_item)
       credit_note.save
       user.account.create_activity(
         :create_credit,
@@ -304,12 +273,27 @@ module Billing
       credit_note
     end
 
+    def last_generated_invoice_item
+      return [] if id.nil? && @existing_server_id.nil?
+      @last_generated_invoice_item ||= begin
+        source_type = is_a?(ServerWizard) ? 'Server' : self.class.to_s
+        InvoiceItem.where(
+          source_type: source_type,
+          source_id: id || @existing_server_id
+        ).order(updated_at: :desc).first
+      end
+    end
+
     def determine_vat_coupon_status(credit_note, invoice_item)
       return unless invoice_item.present?
       invoice = invoice_item.invoice
       credit_note.vat_exempt = invoice.vat_exempt?
       credit_note.tax_code   = invoice.tax_code
       credit_note.coupon_id = invoice.coupon_id
+    end
+
+    def set_old_server_specs(old_server_specs)
+      @old_server_specs = old_server_specs
     end
   end
 end

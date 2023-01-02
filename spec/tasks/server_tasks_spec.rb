@@ -1,13 +1,18 @@
 require 'rails_helper'
 
-xdescribe ServerTasks do
+describe ServerTasks do
+  before :each do
+    allow_any_instance_of(Server).to receive(:supports_multiple_ips?).and_return(false)
+  end
+
   it 'sets the correct state when refreshing the server' do
-    info = {
-      'ip_addresses' => [{ 'ip_address' => { 'address' => '192.168.1.1' } }],
-      'locked' => false
-    }
     server = FactoryGirl.create :server
     task = ServerTasks.new
+    info = {
+      'ip_addresses' => [{ 'ip_address' => { 'address' => '192.168.1.1' } }],
+      'locked' => false, 'cpus' => server.cpus, 'memory' => server.memory,
+      'total_disk_size' => server.disk_size
+    }
 
     info['built'] = false
     allow_any_instance_of(Squall::VirtualMachine).to receive(:show).and_return(info)
@@ -30,7 +35,89 @@ xdescribe ServerTasks do
     expect(server.state).to eq(:on)
   end
 
-  context 'against real existing server', :vcr do
+  context 'update billing when params changed' do
+    let(:server) { FactoryGirl.create :server }
+    let(:account) { server.user.account }
+    let(:task) { ServerTasks.new }
+    let(:info) { { 'ip_addresses' => [{ 'ip_address' => { 'address' => '192.168.1.1' } }],
+              'locked' => false, 'booted' => true, 'cpus' => server.cpus,
+              'memory' => server.memory, 'total_disk_size' => server.disk_size } }
+    before :each do
+      allow_any_instance_of(Squall::VirtualMachine).to receive(:show).and_return(info)
+      FactoryGirl.create :payment_receipt, account: account
+    end
+
+    context 'refresh server with billing change' do
+      before :each do
+        expect(AdminMailer).to receive(:notify_automatic_invoice).with(server, instance_of(Server)).
+          and_return(double(deliver_now: true))
+      end
+
+      it 'creates credit_note and invoice if memory changed' do
+        info['memory'] = server.memory + 1
+        task.perform(:refresh_server, server.user.id, server.id)
+        expect(account.invoices.count).to eq 1
+        expect(account.credit_notes.count).to eq 1
+        a_params = server.activities.first[:parameters]
+        expect(a_params[:old_memory] < a_params[:new_memory]).to be_truthy
+      end
+
+      it 'creates credit_note and invoice if cpu changed' do
+        info['cpus'] = server.cpus + 1
+        task.perform(:refresh_server, server.user.id, server.id)
+        expect(account.invoices.count).to eq 1
+        expect(account.credit_notes.count).to eq 1
+        a_params = server.activities.first[:parameters]
+        expect(a_params[:old_cpus] < a_params[:new_cpus]).to be_truthy
+      end
+
+      it 'creates credit_note and invoice if disk_size changed' do
+        info['total_disk_size'] = server.disk_size + 1
+        task.perform(:refresh_server, server.user.id, server.id)
+        expect(account.invoices.count).to eq 1
+        expect(account.credit_notes.count).to eq 1
+        a_params = server.activities.first[:parameters]
+        expect(a_params[:old_disk_size] < a_params[:new_disk_size]).to be_truthy
+      end
+
+      it 'creates credit_note and invoice if server in edit but force update' do
+        server.update(no_refresh: true)
+        info['total_disk_size'] = server.disk_size + 1
+        task.perform(:refresh_server, server.user.id, server.id, :force_update)
+        expect(account.invoices.count).to eq 1
+        expect(account.credit_notes.count).to eq 1
+        a_params = server.activities.first[:parameters]
+        expect(a_params[:old_disk_size] < a_params[:new_disk_size]).to be_truthy
+      end
+    end
+
+    context 'refresh server with no billing change' do
+      before :each do
+        expect(AdminMailer).not_to receive(:notify_automatic_invoice)
+      end
+
+      it 'does not create credit_note and invoice if :monitoring task' do
+        info['total_disk_size'] = server.disk_size + 1
+        task.perform(:refresh_server, server.user.id, server.id, false, :monitoring)
+        expect(account.invoices.count).to eq 0
+        expect(account.credit_notes.count).to eq 0
+        expect(server.activities).to be_empty
+        server.reload
+        expect(server.disk_size).to eq info['total_disk_size']
+      end
+
+      it 'does not create credit_note and invoice if server in edit' do
+        server.update(no_refresh: true)
+        info['total_disk_size'] = server.disk_size + 1
+        task.perform(:refresh_server, server.user.id, server.id)
+        expect(account.invoices.count).to eq 0
+        expect(account.credit_notes.count).to eq 0
+        expect(server.activities).to be_empty
+      end
+    end
+  end
+
+  xcontext 'against real existing server', :vcr do
     include_context :with_server
 
     it 'grabs the CPU usages for the server' do
@@ -100,17 +187,30 @@ xdescribe ServerTasks do
       end.to raise_error Faraday
     end
 
-    it 'should change the resources of an existing server' do
-      @server.cpus = 2
-      @server.memory = 1024
-      @server.save!
-      @server_task.perform(:edit, @user.id, @server.id)
+    describe 'Editing a server' do
+      it 'should change the disk size of an existing server' do
+        @server.disk_size = 25
+        @server.save!
+        @server_task.perform(:edit, @user.id, @server.id)
 
-      @server.wait_until_ready
-      @server_task.perform(:refresh_server, @server.user.id, @server.id)
-      @server.reload
-      expect(@server.cpus).to eq 2
-      expect(@server.memory).to eq 1024
+        @server.wait_until_ready
+        @server_task.perform(:refresh_server, @server.user.id, @server.id)
+        @server.reload
+        expect(@server.disk_size).to eq 25
+      end
+
+      it 'should change the resources of an existing server' do
+        @server.cpus = 2
+        @server.memory = 1024
+        @server.save!
+        @server_task.perform(:edit, @user.id, @server.id)
+
+        @server.wait_until_ready
+        @server_task.perform(:refresh_server, @server.user.id, @server.id)
+        @server.reload
+        expect(@server.cpus).to eq 2
+        expect(@server.memory).to eq 1024
+      end
     end
   end
 end

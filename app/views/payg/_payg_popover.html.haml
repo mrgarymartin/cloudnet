@@ -3,27 +3,8 @@
     .modal-content
       .modal-header
         %button.close{"aria-hidden" => "true", "data-dismiss" => "modal", type: "button"} ×
-        %h4#payg-add-funds-label.modal-title Add Funds to PAYG Account
-
+        %h4#payg-add-funds-label.modal-title Add Funds to Wallet
       .modal-body
-        .jg-widget-form.pure-g-r.clearfix
-          %div
-            %p 
-              Your current balance is
-              %strong= Invoice.pretty_total(current_user.account.payg_balance)
-              and you currently have 
-              %strong= Invoice.pretty_total(current_user.account.available_payg_balance)
-              available
-            %p Please select the amount you wish to top up (minimum is $5 USD)
-          .form-group.pure-u-1
-            = select_tag :payg_amount, payg_options
-      
-        .modal-footer
-          - if current_user.account.primary_billing_card.present?
-            %a.btn.jg-submit-button#payg-top-up-card Top Up via Primary Card
-          = link_to payg_paypal_request_path, id: "payg_paypal_button" do
-            = image_tag 'https://www.paypal.com/en_US/i/btn/btn_dg_pay_w_paypal.gif'
-
 
 #payg-confirm-payg-dialog.modal.input-form.fade{"aria-hidden" => "true", "aria-labelledby" => "payg-confirm-payg-label", role: "dialog", tabindex: "-1", "data-backdrop" => 'static'}
   .modal-dialog
@@ -39,18 +20,23 @@
     .modal-content
       .modal-header
         %button.close{"aria-hidden" => "true", "data-dismiss" => "modal", type: "button"} ×
-        %h4#payg-status-payg-label.modal-title PAYG Top Up Status Update
+        %h4#payg-status-payg-label.modal-title Wallet Top Up Status Update
       .modal-body
         #status-payg-content
 
         .modal-footer
           %button.btn.jg-back-button{"data-dismiss" => "modal"} Close
 
+#payg-add-card.modal.input-form.fade{"aria-hidden" => "true", "aria-labelledby" => "payg-add-card-label", role: "dialog", "data-backdrop" => 'static', keyboard: 'false'}
+  .modal-dialog
+    .modal-content
+      .modal-header
+        %button.close{"aria-hidden" => "true", "data-dismiss" => "modal", type: "button"} ×
+        %h4#payg-add-card-label.modal-title Add new Card
+      .modal-body#jg-add-card
+        = render partial: 'billing/add_card/add_card_form'
 
 = javascript_include_tag "payg/payg_topup"
 = javascript_include_tag "https://www.paypalobjects.com/js/external/dg.js"
-
-:javascript
-  var pp_flow = new PAYPAL.apps.DGFlow( {trigger : 'payg_paypal_button', stage: 'sandbox'} );
 
 = javascript_include_tag "payg/paypal_responder"

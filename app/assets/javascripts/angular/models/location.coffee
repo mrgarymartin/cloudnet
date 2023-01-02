@@ -1,7 +1,14 @@
 class models.Location
   constructor: (options) ->
     $.extend @, options
-
+    @getPopupPictures()
+    
+  getPopupPictures: ->
+    photoBuilder = new helpers.PhotoBuilder(this)
+    @photoData = photoBuilder.fetchPhoto()
+    @photoData.then (photo) =>
+      @photoData = photo
+      
   pricePerHour: (counts) ->
     exactPricePerHour.call(@, counts.cpu, counts.mem, counts.disk).toFixed(5) 
     
@@ -16,6 +23,9 @@ class models.Location
     
   fPriceDisk: ->
     parseFloat(@priceDisk)
+    
+  freeBandwidth: (counts) ->
+    (parseFloat(@inclusiveBandwidth) / 1024 * counts.mem).toFixed(1)
     
   exactPricePerHour = (cpu, mem, disk) ->
     cpu = parseInt(cpu,10)

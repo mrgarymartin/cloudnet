@@ -1,0 +1,17 @@
+.pure-g
+  .pure-u-1
+    .trigger.btn.btn-default.btn-sm{:"ng-click" => "toggleInfo()"} More info
+.info-part{:"ng-show" => "showInfo"}
+  .pure-g
+    .pure-u-7-12
+      %h3
+        Summary
+      .summary
+        {{location.summary}}
+      .certificate{:"ng-repeat" => "cert in location.certificates"}
+        %img.c-avatar{:"ng-src" => "{{cert.avatar}}"}
+        
+    .pure-u-5-12
+      .location-map
+      .uptime-time-chart
+    

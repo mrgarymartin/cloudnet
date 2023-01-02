@@ -25,9 +25,14 @@ require 'capistrano/deploy'
 require 'capistrano/rails'
 require 'capistrano/puma'
 require 'capistrano/puma/workers'
+require 'capistrano/puma/jungle'
+require 'capistrano/puma/monit'
 require 'capistrano/sidekiq'
+require 'capistrano/sidekiq/monit'
 require 'whenever/capistrano'
 require 'capistrano/upload-config'
+require 'capistrano/rails/console'
+require 'capistrano/rake'
 
 # Loads custom tasks from `lib/capistrano/tasks' if you have any defined.
 Dir.glob('lib/capistrano/tasks/*.cap').each { |r| import r }

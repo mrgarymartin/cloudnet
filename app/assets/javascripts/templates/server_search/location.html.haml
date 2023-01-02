@@ -10,8 +10,7 @@
       %span.square-label.font-11{:"ng-hide" => "location.budgetVps"} CLOUD
   .pure-u-1-5
     .provider
-      %span.font-11 PROVIDER:
-      %span.provider-name{title: "{{location.provider}}"} {{location.provider | limitTo:13}}
+      %span.provider-name{title: "{{location.provider}}"} {{location.provider}}
 .pure-g
   .pure-u-1-5
     .uptime-chart
@@ -21,7 +20,7 @@
       .border
     .labelg 
       cloud index
-      %a{href: "http://feedback.cloud.net/knowledge-base/article/how-is-the-cloud-index-calculated-",
+      %a{href: "https://help.cloud.net/hc/en-us/articles/206557364",
           target: "_blank" } {{location.cloudIndex}}
   .pure-u-2-5
     .parameters
@@ -41,6 +40,11 @@
             = image_tag('cpu-pic.png')
           %td.descr.font-11 CPU (Cores)
           %td {{cpuPerHour()}}
+        %tr
+          %td.pictogram
+            = image_tag('cpu-pic.png')
+          %td.descr.font-11 TRAFFIC
+          %td {{freeBandwidthPerMonth()}}
   .pure-u-1-5
     .action{:"ng-hide" => "location.budgetVps && noPackageActive()"}
       .price-box
@@ -55,3 +59,5 @@
     .no-package-message{:"ng-show" => "location.budgetVps && noPackageActive()"}
       .action
         Choose predefined package for VPS pricing
+        
+%additional-info{:"ng-show" => "showMore()",location: "location"}

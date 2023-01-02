@@ -1,19 +1,23 @@
 class RegistrationsController < Devise::RegistrationsController
   include SessionOrderReport
   before_action :prepare_order
-  # def new
-  # end
-  #
-  # def create
-  #   flash[:info] = 'Registrations are not open yet for the Cloud.net beta, but please check back soon'
-  #   redirect_to :back
-  # end
+  before_action :load_keys, only: [:edit, :update]
 
   def new
-    # We want to have the ability to fill in some params
-    #prepare_order if session[:user_return_to]
+    analytics_info unless monitoring_service?
     build_resource(sign_up_params)
     respond_with resource
+  end
+  
+  def edit
+    @key = Key.new
+    super
+  end
+  
+  def update
+    super
+    current_user.reload
+    current_user.update_sift_account
   end
 
   protected
@@ -23,4 +27,20 @@ class RegistrationsController < Devise::RegistrationsController
     super
   end
   
+  def analytics_info
+    Analytics.track(current_user, event_details, anonymous_id, request)
+  end
+  
+  def event_details
+    {event: 'Registration Page',
+      properties: UtmTracker.extract_properties(params)
+    }
+  end
+  
+  private
+  
+  def load_keys
+    @keys = current_user.keys
+    @api_keys = current_user.api_keys
+  end
 end

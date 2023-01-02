@@ -9,10 +9,14 @@ class UserTasks < BaseTasks
     run_task(action, user, squall)
   end
 
+  def self.total_unbilled_revenue
+    User.all.to_a.sum {|u| u.try(:account).try(:used_payg_balance).to_f}
+  end
+
   private
 
   def create(user, squall)
-    acc = generate_user_credentials(user.id, user.full_name).merge(role_ids: [ONAPP_CP[:user_role]])
+    acc = generate_user_credentials(user.id, user.full_name).merge(role_ids: [ONAPP_CP[:user_role]], billing_plan_id: ONAPP_CP[:billing_plan])
 
     response = squall.create(acc)
     user.update!(
@@ -22,13 +26,22 @@ class UserTasks < BaseTasks
       onapp_password: acc[:password],
       status: :active
     )
+
+    # Create a Sift Science account for user
+    user.create_sift_account
+    user.create_sift_login_event
+  end
+
+  def update_billing_plan(user, squall)
+    params = { billing_plan_id: ONAPP_CP[:billing_plan] }
+    squall.edit(user.onapp_id, params)
   end
 
   def generate_user_credentials(id, full_name)
     begin
       cut_name = full_name.gsub(' ', '-').downcase.tr('^a-z\-', '')[0..USERNAME_SIZE]
       username = "#{cut_name}_#{id}_#{SecureRandom.hex(3)}"
-      email    = "#{username}@cloud.net"
+      email    = "#{username}@#{ENV['HOST_DOMAIN']}"
       password = generate_password(PASSWORD_SIZE)
     end while User.where(onapp_user: username).exists?
 
@@ -36,7 +49,7 @@ class UserTasks < BaseTasks
   end
 
   def allowable_methods
-    super + [:create]
+    super + [:create, :update_billing_plan]
   end
 
   def generate_password(size)
